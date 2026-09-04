@@ -22,9 +22,9 @@ export async function GET() {
 
     return NextResponse.json({
       settings: settings || {
-        pharmacy_name: 'HealthPlus Pharmacy',
-        display_name: 'Purchase Summary Manager',
-        upi_id: 'pharmacy@upi',
+        pharmacy_name: 'Revathi Medicals & Distributors',
+        display_name: 'Purchase Summary & Payment Manager',
+        upi_id: 'revathimedicals@upi',
         timezone: 'Asia/Kolkata',
         reminders_enabled: true,
         max_reminder_days: 30,

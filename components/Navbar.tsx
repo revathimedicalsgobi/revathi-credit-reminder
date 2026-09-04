@@ -10,7 +10,7 @@ export function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
   const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [pharmacyName, setPharmacyName] = useState<string>('HealthPlus Pharmacy');
+  const [pharmacyName, setPharmacyName] = useState<string>('Revathi Medicals & Distributors');
 
   useEffect(() => {
     const supabase = createClient();
