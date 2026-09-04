@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getWhatsAppProvider } from '@/lib/whatsapp';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -58,7 +61,7 @@ export async function POST(
 
     // 4. Fetch Pharmacy Settings
     const { data: settings } = await supabase.from('settings').select('*').limit(1).maybeSingle();
-    const pharmacyName = settings?.pharmacy_name || 'HealthPlus Pharmacy';
+    const pharmacyName = settings?.pharmacy_name || 'Revathi Medicals & Distributors';
 
     // 5. Trigger Thank-You WhatsApp Message
     let whatsappResult = null;

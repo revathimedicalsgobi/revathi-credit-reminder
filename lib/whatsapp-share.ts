@@ -82,6 +82,32 @@ Please complete the payment at your earliest convenience.
 Thank you for your visit! 🙏`;
 }
 
+export interface WhatsAppThankYouData {
+  customerName: string;
+  recipientPhone: string;
+  amountReceived: number;
+  pharmacyName?: string;
+}
+
+/**
+ * Builds polite thank-you message for WhatsApp Web
+ */
+export function buildWhatsAppThankYouText(data: WhatsAppThankYouData): string {
+  const pharmacy = data.pharmacyName || 'Revathi Medicals & Distributors';
+  const amountStr = formatINR(data.amountReceived);
+
+  return `━━━━━━━━━━━━━━━━━━━━
+🏥 *${pharmacy.toUpperCase()}*
+✅ *PAYMENT RECEIVED*
+━━━━━━━━━━━━━━━━━━━━
+
+Hello *${data.customerName}*,
+
+We have received your payment of *${amountStr}* successfully.
+
+Thank you for choosing *${pharmacy}*. We look forward to serving you again! 🙏`;
+}
+
 /**
  * Generates direct WhatsApp chat link (works for WhatsApp Web & WhatsApp App)
  */

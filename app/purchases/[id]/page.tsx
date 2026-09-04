@@ -20,7 +20,7 @@ import { formatINR } from '@/lib/calculations';
 import { getPendingAgeText, getPendingDaysCount, formatDisplayDate } from '@/lib/utils';
 import { PurchaseSummaryCard } from '@/components/PurchaseSummaryCard';
 import { PaymentReceivedModal } from '@/components/PaymentReceivedModal';
-import { buildWhatsAppReminderText, getWhatsAppDirectUrl } from '@/lib/whatsapp-share';
+import { buildWhatsAppReminderText, buildWhatsAppThankYouText, getWhatsAppDirectUrl } from '@/lib/whatsapp-share';
 
 export default function PurchaseDetailPage() {
   const params = useParams();
@@ -47,7 +47,7 @@ export default function PurchaseDetailPage() {
 
   // Fetch settings for branding
   useEffect(() => {
-    fetch('/api/settings')
+    fetch(`/api/settings?t=${Date.now()}`, { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
         if (data?.settings) {
@@ -61,8 +61,7 @@ export default function PurchaseDetailPage() {
 
   const fetchPurchase = useCallback(async () => {
     try {
-      setLoading(true);
-      const res = await fetch(`/api/purchases/${purchaseId}`);
+      const res = await fetch(`/api/purchases/${purchaseId}?t=${Date.now()}`, { cache: 'no-store' });
       const data = await res.json();
 
       if (!res.ok || !data.purchase) {
@@ -127,6 +126,20 @@ export default function PurchaseDetailPage() {
     window.open(chatUrl, '_blank', 'noopener,noreferrer');
   };
 
+  const handleSendManualThankYou = () => {
+    if (!purchase) return;
+    const phone = purchase.customer?.whatsapp_number || '';
+    const thankYouText = buildWhatsAppThankYouText({
+      customerName: purchase.customer?.name || 'Customer',
+      recipientPhone: phone,
+      amountReceived: Number(purchase.amount_payable),
+      pharmacyName,
+    });
+
+    const chatUrl = getWhatsAppDirectUrl(phone, thankYouText);
+    window.open(chatUrl, '_blank', 'noopener,noreferrer');
+  };
+
   const handleConfirmPayment = async () => {
     setIsProcessingPayment(true);
     setPaymentModalError(null);
@@ -141,12 +154,24 @@ export default function PurchaseDetailPage() {
         throw new Error(data?.error || 'Failed to mark payment received');
       }
 
+      // Optimistic update
+      setPurchase((prev) =>
+        prev
+          ? {
+              ...prev,
+              payment_status: 'PAID',
+              payment_received_at: new Date().toISOString(),
+            }
+          : null
+      );
+
       setShowPaymentModal(false);
-      setActionSuccessMsg('Payment marked as PAID. Thank-you WhatsApp message sent!');
+      setActionSuccessMsg('Payment marked as PAID successfully!');
       fetchPurchase();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to process payment';
       setPaymentModalError(msg);
+      throw err;
     } finally {
       setIsProcessingPayment(false);
     }
@@ -216,7 +241,7 @@ export default function PurchaseDetailPage() {
             <span>Print</span>
           </button>
 
-          {isPending && (
+          {isPending ? (
             <button
               onClick={handleSendManualReminder}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl shadow-sm transition-all"
@@ -224,6 +249,15 @@ export default function PurchaseDetailPage() {
             >
               <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
               <span>WhatsApp Reminder</span>
+            </button>
+          ) : (
+            <button
+              onClick={handleSendManualThankYou}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl shadow-sm transition-all"
+              title="Open customer chat on WhatsApp Web with Thank-You message"
+            >
+              <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+              <span>WhatsApp Thank-You</span>
             </button>
           )}
 
@@ -420,7 +454,9 @@ export default function PurchaseDetailPage() {
           onClose={() => setShowPaymentModal(false)}
           onConfirm={handleConfirmPayment}
           customerName={purchase.customer?.name || 'Customer'}
+          whatsappNumber={purchase.customer?.whatsapp_number || ''}
           amountPayable={Number(purchase.amount_payable)}
+          pharmacyName={pharmacyName}
           isProcessing={isProcessingPayment}
           errorMessage={paymentModalError}
         />

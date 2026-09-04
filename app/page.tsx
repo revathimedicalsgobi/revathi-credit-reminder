@@ -22,7 +22,7 @@ import { formatINR } from '@/lib/calculations';
 import { getPendingAgeText, getPendingDaysCount, formatShortDate, maskWhatsAppNumber } from '@/lib/utils';
 import { PaymentStatusBadge } from '@/components/StatusBadge';
 import { PaymentReceivedModal } from '@/components/PaymentReceivedModal';
-import { buildWhatsAppReminderText, getWhatsAppDirectUrl } from '@/lib/whatsapp-share';
+import { buildWhatsAppReminderText, buildWhatsAppThankYouText, getWhatsAppDirectUrl } from '@/lib/whatsapp-share';
 
 export default function DashboardPage() {
   const [purchases, setPurchases] = useState<Purchase[]>([]);
@@ -44,6 +44,7 @@ export default function DashboardPage() {
   const [activePaymentModal, setActivePaymentModal] = useState<{
     purchaseId: string;
     customerName: string;
+    whatsappNumber: string;
     amount: number;
   } | null>(null);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
@@ -51,7 +52,8 @@ export default function DashboardPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const statsRes = await fetch('/api/stats');
+      const timestamp = Date.now();
+      const statsRes = await fetch(`/api/stats?t=${timestamp}`, { cache: 'no-store' });
       const statsData = await statsRes.json();
       if (statsData?.stats) {
         setStats(statsData.stats);
@@ -59,7 +61,7 @@ export default function DashboardPage() {
 
       const filterParam = statusFilter === 'ALL' ? '' : `status=${statusFilter}`;
       const searchParam = searchTerm ? `&search=${encodeURIComponent(searchTerm)}` : '';
-      const purchasesRes = await fetch(`/api/purchases?${filterParam}${searchParam}`);
+      const purchasesRes = await fetch(`/api/purchases?t=${timestamp}&${filterParam}${searchParam}`, { cache: 'no-store' });
       const purchasesData = await purchasesRes.json();
 
       if (purchasesData?.purchases) {
@@ -79,7 +81,7 @@ export default function DashboardPage() {
 
   // Fetch settings for pharmacy name & upiId
   useEffect(() => {
-    fetch('/api/settings')
+    fetch(`/api/settings?t=${Date.now()}`, { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
         if (data?.settings) {
@@ -107,6 +109,19 @@ export default function DashboardPage() {
     window.open(chatUrl, '_blank', 'noopener,noreferrer');
   };
 
+  const handleSendManualThankYou = (purchase: Purchase) => {
+    const phone = purchase.customer?.whatsapp_number || '';
+    const thankYouText = buildWhatsAppThankYouText({
+      customerName: purchase.customer?.name || 'Customer',
+      recipientPhone: phone,
+      amountReceived: Number(purchase.amount_payable),
+      pharmacyName,
+    });
+
+    const chatUrl = getWhatsAppDirectUrl(phone, thankYouText);
+    window.open(chatUrl, '_blank', 'noopener,noreferrer');
+  };
+
   const handleManualRefresh = () => {
     setRefreshing(true);
     fetchData();
@@ -117,6 +132,7 @@ export default function DashboardPage() {
     setActivePaymentModal({
       purchaseId: purchase.id,
       customerName: purchase.customer?.name || 'Customer',
+      whatsappNumber: purchase.customer?.whatsapp_number || '',
       amount: Number(purchase.amount_payable),
     });
   };
@@ -126,8 +142,11 @@ export default function DashboardPage() {
     setIsProcessingPayment(true);
     setPaymentModalError(null);
 
+    const targetId = activePaymentModal.purchaseId;
+    const targetAmount = activePaymentModal.amount;
+
     try {
-      const res = await fetch(`/api/purchases/${activePaymentModal.purchaseId}/payment-received`, {
+      const res = await fetch(`/api/purchases/${targetId}/payment-received`, {
         method: 'POST',
       });
       const data = await res.json();
@@ -136,11 +155,30 @@ export default function DashboardPage() {
         throw new Error(data?.error || 'Failed to mark payment as received');
       }
 
+      // Optimistic update of local purchases list
+      setPurchases((prev) =>
+        prev.map((p) =>
+          p.id === targetId
+            ? { ...p, payment_status: 'PAID', payment_received_at: new Date().toISOString() }
+            : p
+        )
+      );
+
+      // Optimistic update of stats
+      setStats((prev) => ({
+        ...prev,
+        pending_customers_count: Math.max(0, prev.pending_customers_count - 1),
+        pending_amount: Math.max(0, prev.pending_amount - targetAmount),
+        payments_received_today_count: prev.payments_received_today_count + 1,
+        payments_received_today_amount: prev.payments_received_today_amount + targetAmount,
+      }));
+
       setActivePaymentModal(null);
-      fetchData();
+      await fetchData();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error updating payment status';
       setPaymentModalError(msg);
+      throw err;
     } finally {
       setIsProcessingPayment(false);
     }
@@ -406,7 +444,7 @@ export default function DashboardPage() {
                               <span>View</span>
                             </Link>
 
-                            {isPending && (
+                            {isPending ? (
                               <>
                                 <button
                                   onClick={() => handleSendManualReminder(purchase)}
@@ -425,6 +463,15 @@ export default function DashboardPage() {
                                   <span>Payment Received</span>
                                 </button>
                               </>
+                            ) : (
+                              <button
+                                onClick={() => handleSendManualThankYou(purchase)}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold transition-all shadow-2xs"
+                                title="Open WhatsApp Web chat with Thank-You message"
+                              >
+                                <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>Thank-You</span>
+                              </button>
                             )}
                           </div>
                         </td>
@@ -485,7 +532,7 @@ export default function DashboardPage() {
                           View
                         </Link>
 
-                        {isPending && (
+                        {isPending ? (
                           <>
                             <button
                               onClick={() => handleSendManualReminder(purchase)}
@@ -503,6 +550,15 @@ export default function DashboardPage() {
                               Paid
                             </button>
                           </>
+                        ) : (
+                          <button
+                            onClick={() => handleSendManualThankYou(purchase)}
+                            className="px-2.5 py-1.5 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold flex items-center gap-1"
+                            title="Send Thank-You on WhatsApp"
+                          >
+                            <MessageCircle className="w-3 h-3 text-emerald-600" />
+                            <span>Thank-You</span>
+                          </button>
                         )}
                       </div>
                     </div>
@@ -520,7 +576,9 @@ export default function DashboardPage() {
           onClose={() => setActivePaymentModal(null)}
           onConfirm={handleConfirmPaymentReceived}
           customerName={activePaymentModal.customerName}
+          whatsappNumber={activePaymentModal.whatsappNumber}
           amountPayable={activePaymentModal.amount}
+          pharmacyName={pharmacyName}
           isProcessing={isProcessingPayment}
           errorMessage={paymentModalError}
         />

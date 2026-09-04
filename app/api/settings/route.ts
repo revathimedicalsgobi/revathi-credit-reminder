@@ -3,6 +3,9 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { PharmacySettingsSchema } from '@/lib/validations';
 import { getWhatsAppProvider } from '@/lib/whatsapp';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET() {
   try {
     const supabase = createAdminClient();
