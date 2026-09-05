@@ -22,7 +22,7 @@ import { PurchaseSummaryCard } from '@/components/PurchaseSummaryCard';
 import { PaymentReceivedModal } from '@/components/PaymentReceivedModal';
 import { buildWhatsAppReminderText, buildWhatsAppThankYouText, getWhatsAppDirectUrl } from '@/lib/whatsapp-share';
 
-export default function PurchaseDetailPage() {
+function PurchaseDetailContent() {
   const params = useParams();
   const searchParams = useSearchParams();
   const purchaseId = params.id as string;
@@ -462,5 +462,20 @@ export default function PurchaseDetailPage() {
         />
       )}
     </div>
+  );
+}
+
+export default function PurchaseDetailPage() {
+  return (
+    <React.Suspense
+      fallback={
+        <div className="py-24 text-center text-slate-400 text-sm flex flex-col items-center justify-center gap-2">
+          <div className="w-8 h-8 border-3 border-emerald-500/20 border-t-emerald-600 rounded-full animate-spin" />
+          <span>Loading purchase details...</span>
+        </div>
+      }
+    >
+      <PurchaseDetailContent />
+    </React.Suspense>
   );
 }

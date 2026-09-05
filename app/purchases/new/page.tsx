@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Plus,
   Trash2,
@@ -23,8 +23,9 @@ interface ItemRow {
   discount: string;
 }
 
-export default function NewPurchasePage() {
+function NewPurchaseContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   // Pharmacy Branding Settings
   const [pharmacyName, setPharmacyName] = useState('Revathi Medicals & Distributors');
@@ -32,8 +33,8 @@ export default function NewPurchasePage() {
   const [paymentQrUrl, setPaymentQrUrl] = useState<string | null>(null);
 
   // Customer Form State
-  const [customerName, setCustomerName] = useState('');
-  const [whatsappNumber, setWhatsappNumber] = useState('');
+  const [customerName, setCustomerName] = useState(searchParams.get('name') || '');
+  const [whatsappNumber, setWhatsappNumber] = useState(searchParams.get('phone') || '');
   const [sendWhatsApp, setSendWhatsApp] = useState(true);
 
   // Item Rows State with unique IDs
@@ -46,9 +47,17 @@ export default function NewPurchasePage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  // Auto-populate from URL query params if user clicked "+ Bill" from customer master
+  useEffect(() => {
+    const paramName = searchParams.get('name');
+    const paramPhone = searchParams.get('phone');
+    if (paramName && !customerName) setCustomerName(paramName);
+    if (paramPhone && !whatsappNumber) setWhatsappNumber(paramPhone);
+  }, [searchParams, customerName, whatsappNumber]);
+
   // Fetch saved settings for branding
   useEffect(() => {
-    fetch('/api/settings')
+    fetch('/api/settings?t=' + Date.now(), { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
         if (data?.settings) {
@@ -478,5 +487,20 @@ export default function NewPurchasePage() {
         errorMessage={formError}
       />
     </div>
+  );
+}
+
+export default function NewPurchasePage() {
+  return (
+    <React.Suspense
+      fallback={
+        <div className="py-24 text-center text-slate-400 text-sm flex flex-col items-center justify-center gap-2">
+          <div className="w-8 h-8 border-3 border-emerald-500/20 border-t-emerald-600 rounded-full animate-spin" />
+          <span>Loading purchase form...</span>
+        </div>
+      }
+    >
+      <NewPurchaseContent />
+    </React.Suspense>
   );
 }

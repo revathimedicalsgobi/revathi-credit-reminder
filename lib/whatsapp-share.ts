@@ -108,6 +108,60 @@ We have received your payment of *${amountStr}* successfully.
 Thank you for choosing *${pharmacy}*. We look forward to serving you again! 🙏`;
 }
 
+export interface WhatsAppStatementData {
+  customerName: string;
+  recipientPhone: string;
+  totalPurchasesCount: number;
+  totalBilled: number;
+  totalPaid: number;
+  outstandingBalance: number;
+  pendingBills: Array<{
+    date: string | Date;
+    amount: number;
+  }>;
+  pharmacyName?: string;
+  upiId?: string | null;
+}
+
+/**
+ * Builds polite and detailed customer account statement message for WhatsApp
+ */
+export function buildWhatsAppCustomerStatementText(data: WhatsAppStatementData): string {
+  const pharmacy = data.pharmacyName || 'Revathi Medicals & Distributors';
+  const totalBilledStr = formatINR(data.totalBilled);
+  const totalPaidStr = formatINR(data.totalPaid);
+  const balanceStr = formatINR(data.outstandingBalance);
+  const upiLine = data.upiId ? `\n💳 *UPI ID:* ${data.upiId}` : '';
+
+  let pendingListText = '';
+  if (data.pendingBills.length > 0) {
+    const lines = data.pendingBills.map((b, idx) => {
+      const dStr = formatShortDate(b.date);
+      const amtStr = formatINR(b.amount);
+      return `${idx + 1}. ${dStr} - ${amtStr}`;
+    });
+    pendingListText = `\n\n📌 *Pending Bills (${data.pendingBills.length}):*\n` + lines.join('\n');
+  }
+
+  return `━━━━━━━━━━━━━━━━━━━━
+🏥 *${pharmacy.toUpperCase()}*
+📋 *ACCOUNT STATEMENT*
+━━━━━━━━━━━━━━━━━━━━
+
+Hello *${data.customerName}*,
+
+Here is your current account statement with *${pharmacy}*:
+
+📊 *Summary:*
+• Total Invoices: ${data.totalPurchasesCount}
+• Total Billed: *${totalBilledStr}*
+• Total Paid: *${totalPaidStr}*
+• 🔴 *Outstanding Balance:* *${balanceStr}*${pendingListText}${upiLine}
+
+Please settle any outstanding balance at your earliest convenience.
+Thank you for choosing *${pharmacy}*! 🙏`;
+}
+
 /**
  * Generates direct WhatsApp chat link (works for WhatsApp Web & WhatsApp App)
  */

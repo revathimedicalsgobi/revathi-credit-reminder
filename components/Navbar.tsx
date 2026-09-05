@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { PlusCircle, LayoutDashboard, Settings as SettingsIcon, LogOut, ReceiptText, ShieldCheck } from 'lucide-react';
+import { PlusCircle, LayoutDashboard, Settings as SettingsIcon, LogOut, ReceiptText, ShieldCheck, Users } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
 export function Navbar() {
@@ -66,7 +66,7 @@ export function Navbar() {
               href="/"
               className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-colors ${
                 pathname === '/'
-                  ? 'bg-emerald-50 text-emerald-700'
+                  ? 'bg-emerald-50 text-emerald-700 font-bold'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
               }`}
             >
@@ -75,10 +75,22 @@ export function Navbar() {
             </Link>
 
             <Link
+              href="/customers"
+              className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-colors ${
+                pathname.startsWith('/customers')
+                  ? 'bg-emerald-50 text-emerald-700 font-bold'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <Users className="w-4 h-4" />
+              <span>Customers Master</span>
+            </Link>
+
+            <Link
               href="/settings"
               className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-colors ${
                 pathname === '/settings'
-                  ? 'bg-emerald-50 text-emerald-700'
+                  ? 'bg-emerald-50 text-emerald-700 font-bold'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
               }`}
             >

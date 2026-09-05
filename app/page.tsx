@@ -410,7 +410,17 @@ export default function DashboardPage() {
                         className="hover:bg-slate-50/80 transition-colors group"
                       >
                         <td className="py-4 px-6 font-semibold text-slate-900">
-                          {purchase.customer?.name || 'Customer'}
+                          {purchase.customer_id ? (
+                            <Link
+                              href={`/customers/${purchase.customer_id}`}
+                              className="hover:text-emerald-600 hover:underline inline-flex items-center gap-1.5"
+                              title="View Customer Statement"
+                            >
+                              <span>{purchase.customer?.name || 'Customer'}</span>
+                            </Link>
+                          ) : (
+                            <span>{purchase.customer?.name || 'Customer'}</span>
+                          )}
                         </td>
                         <td className="py-4 px-4 text-xs font-mono text-slate-600">
                           {maskWhatsAppNumber(purchase.customer?.whatsapp_number || '')}
@@ -491,9 +501,18 @@ export default function DashboardPage() {
                   <div key={purchase.id} className="p-4 space-y-3 bg-white">
                     <div className="flex items-start justify-between">
                       <div>
-                        <h4 className="font-bold text-slate-900 text-base">
-                          {purchase.customer?.name || 'Customer'}
-                        </h4>
+                        {purchase.customer_id ? (
+                          <Link
+                            href={`/customers/${purchase.customer_id}`}
+                            className="font-bold text-slate-900 text-base hover:text-emerald-700 hover:underline block"
+                          >
+                            {purchase.customer?.name || 'Customer'}
+                          </Link>
+                        ) : (
+                          <h4 className="font-bold text-slate-900 text-base">
+                            {purchase.customer?.name || 'Customer'}
+                          </h4>
+                        )}
                         <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5 font-mono">
                           <Phone className="w-3 h-3 text-slate-400" />
                           <span>{maskWhatsAppNumber(purchase.customer?.whatsapp_number || '')}</span>
