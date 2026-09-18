@@ -30,6 +30,12 @@ export interface PurchaseSummaryMessagePayload {
   pharmacyName: string;
   upiId?: string | null;
   paymentQrUrl?: string | null;
+  previousBalance?: number;
+  cumulativeTotal?: number;
+  dateWisePendingBills?: Array<{
+    date: string | Date;
+    amount: number;
+  }>;
 }
 
 export interface PaymentReminderMessagePayload {

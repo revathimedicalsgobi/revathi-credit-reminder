@@ -148,6 +148,25 @@ export async function POST(request: NextRequest) {
     const upiId = settings?.upi_id || null;
     const paymentQrUrl = settings?.payment_qr_url || null;
 
+    // Fetch previous unpaid pending purchases for this customer to calculate cumulative balance & date-wise statement
+    const { data: previousPendingPurchases } = await supabase
+      .from('purchases')
+      .select('id, purchase_date, amount_payable')
+      .eq('customer_id', customerId)
+      .eq('payment_status', 'PENDING')
+      .neq('id', purchase.id)
+      .order('purchase_date', { ascending: true });
+
+    const previousBalance = (previousPendingPurchases || []).reduce(
+      (sum, p) => sum + Number(p.amount_payable || 0),
+      0
+    );
+    const cumulativeTotal = previousBalance + calculated.amount_payable;
+    const dateWisePendingBills = (previousPendingPurchases || []).map((p) => ({
+      date: p.purchase_date,
+      amount: Number(p.amount_payable || 0),
+    }));
+
     let whatsappResult = null;
     if (send_whatsapp) {
       const whatsappProvider = getWhatsAppProvider();
@@ -169,6 +188,9 @@ export async function POST(request: NextRequest) {
         pharmacyName,
         upiId,
         paymentQrUrl,
+        previousBalance,
+        cumulativeTotal,
+        dateWisePendingBills,
       });
 
       await supabase
@@ -198,6 +220,9 @@ export async function POST(request: NextRequest) {
         items: calculated.items,
         customer: { id: customerId, name: customer_name, whatsapp_number: normalizedPhone },
       },
+      previousBalance,
+      cumulativeTotal,
+      dateWisePendingBills,
       whatsapp: whatsappResult,
     });
   } catch (err: unknown) {

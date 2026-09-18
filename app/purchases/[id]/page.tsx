@@ -20,7 +20,12 @@ import { formatINR } from '@/lib/calculations';
 import { getPendingAgeText, getPendingDaysCount, formatDisplayDate } from '@/lib/utils';
 import { PurchaseSummaryCard } from '@/components/PurchaseSummaryCard';
 import { PaymentReceivedModal } from '@/components/PaymentReceivedModal';
-import { buildWhatsAppReminderText, buildWhatsAppThankYouText, getWhatsAppDirectUrl } from '@/lib/whatsapp-share';
+import {
+  buildWhatsAppReminderText,
+  buildWhatsAppThankYouText,
+  buildWhatsAppSummaryText,
+  getWhatsAppDirectUrl,
+} from '@/lib/whatsapp-share';
 
 function PurchaseDetailContent() {
   const params = useParams();
@@ -29,6 +34,10 @@ function PurchaseDetailContent() {
   const isJustCreated = searchParams.get('created') === 'true';
 
   const [purchase, setPurchase] = useState<Purchase | null>(null);
+  const [previousBalance, setPreviousBalance] = useState<number>(0);
+  const [cumulativeTotal, setCumulativeTotal] = useState<number>(0);
+  const [dateWisePendingBills, setDateWisePendingBills] = useState<Array<{ date: string | Date; amount: number }>>([]);
+
   const [pharmacyName, setPharmacyName] = useState('Revathi Medicals & Distributors');
   const [upiId, setUpiId] = useState<string | null>(null);
   const [paymentQrUrl, setPaymentQrUrl] = useState<string | null>(null);
@@ -69,6 +78,9 @@ function PurchaseDetailContent() {
       }
 
       setPurchase(data.purchase);
+      setPreviousBalance(Number(data.previousBalance || 0));
+      setCumulativeTotal(Number(data.cumulativeTotal || (data.purchase?.amount_payable || 0)));
+      setDateWisePendingBills(data.dateWisePendingBills || []);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to load purchase details';
       setError(msg);
@@ -137,6 +149,34 @@ function PurchaseDetailContent() {
     });
 
     const chatUrl = getWhatsAppDirectUrl(phone, thankYouText);
+    window.open(chatUrl, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleSendCumulativeStatement = () => {
+    if (!purchase) return;
+    const phone = purchase.customer?.whatsapp_number || '';
+    const text = buildWhatsAppSummaryText({
+      customerName: purchase.customer?.name || 'Customer',
+      recipientPhone: phone,
+      purchaseDate: purchase.purchase_date,
+      items: (purchase.items || []).map((i) => ({
+        itemName: i.item_name,
+        quantity: Number(i.quantity) || 1,
+        mrp: Number(i.mrp) || 0,
+        discount_amount: Number(i.discount) || 0,
+        netAmount: Number(i.net_amount) || 0,
+      })),
+      grossTotal: Number(purchase.gross_total) || 0,
+      totalDiscount: Number(purchase.total_discount) || 0,
+      amountPayable: Number(purchase.amount_payable) || 0,
+      pharmacyName,
+      upiId,
+      previousBalance,
+      cumulativeTotal,
+      dateWisePendingBills,
+    });
+
+    const chatUrl = getWhatsAppDirectUrl(phone, text);
     window.open(chatUrl, '_blank', 'noopener,noreferrer');
   };
 
@@ -241,16 +281,31 @@ function PurchaseDetailContent() {
             <span>Print</span>
           </button>
 
-          {isPending ? (
-            <button
-              onClick={handleSendManualReminder}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl shadow-sm transition-all"
-              title="Open customer chat on WhatsApp Web with reminder preloaded"
-            >
-              <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
-              <span>WhatsApp Reminder</span>
-            </button>
-          ) : (
+          {isPending && (
+            <>
+              {previousBalance > 0 && (
+                <button
+                  onClick={handleSendCumulativeStatement}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-rose-800 bg-rose-50 hover:bg-rose-100 active:bg-rose-200 border border-rose-300 rounded-xl shadow-sm transition-all"
+                  title="Open customer chat on WhatsApp Web with full date-wise cumulative statement"
+                >
+                  <MessageCircle className="w-3.5 h-3.5 text-rose-600" />
+                  <span>Cumulative Statement</span>
+                </button>
+              )}
+
+              <button
+                onClick={handleSendManualReminder}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl shadow-sm transition-all"
+                title="Open customer chat on WhatsApp Web with reminder preloaded"
+              >
+                <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                <span>WhatsApp Reminder</span>
+              </button>
+            </>
+          )}
+
+          {!isPending && (
             <button
               onClick={handleSendManualThankYou}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl shadow-sm transition-all"
@@ -334,6 +389,9 @@ function PurchaseDetailContent() {
             totalDiscount={Number(purchase.total_discount)}
             amountPayable={Number(purchase.amount_payable)}
             paymentStatus={purchase.payment_status}
+            previousBalance={previousBalance}
+            cumulativeTotal={cumulativeTotal}
+            dateWisePendingBills={dateWisePendingBills}
             upiId={upiId}
             paymentQrUrl={paymentQrUrl}
             showPrintButton={false}

@@ -37,6 +37,12 @@ interface PurchaseSummaryCardProps {
   paymentStatus: PaymentStatus;
   upiId?: string | null;
   paymentQrUrl?: string | null;
+  previousBalance?: number;
+  cumulativeTotal?: number;
+  dateWisePendingBills?: Array<{
+    date: string | Date;
+    amount: number;
+  }>;
   showPrintButton?: boolean;
   showShareActions?: boolean;
   cardId?: string;
@@ -56,6 +62,9 @@ export function PurchaseSummaryCard({
   paymentStatus,
   upiId,
   paymentQrUrl,
+  previousBalance = 0,
+  cumulativeTotal,
+  dateWisePendingBills,
   showPrintButton = true,
   showShareActions = true,
   cardId = 'purchase-summary-card-capture',
@@ -90,7 +99,7 @@ export function PurchaseSummaryCard({
     const cardEl = document.getElementById(cardId);
     const phone = whatsappNumber || '';
 
-    // 1. Build message text (polite greeting with total only)
+    // 1. Build message text (polite greeting with date-wise cumulative statement if previous balance exists)
     const textMsg = buildWhatsAppSummaryText({
       customerName,
       recipientPhone: phone,
@@ -102,6 +111,9 @@ export function PurchaseSummaryCard({
       amountPayable,
       pharmacyName,
       upiId,
+      previousBalance,
+      cumulativeTotal,
+      dateWisePendingBills,
     });
 
     // 2. Download JPEG and try copy to clipboard
@@ -301,17 +313,30 @@ export function PurchaseSummaryCard({
           )}
         </div>
 
-        {/* BOX SHAPE FOR GRAND TOTAL (As requested) */}
-        <div className="px-6 py-5 bg-white border-t border-slate-200">
-          <div className="border-3 border-emerald-600 bg-gradient-to-br from-emerald-50 via-teal-50/60 to-emerald-100/70 rounded-2xl p-5 text-center shadow-md">
-            <span className="text-xs sm:text-sm font-black uppercase tracking-widest text-emerald-900 block">
-              GRAND TOTAL
-            </span>
-            <div className="text-3xl sm:text-4xl font-black text-emerald-800 tracking-tight my-1">
-              {formatINR(amountPayable)}
+        {/* BOX SHAPE FOR GRAND TOTAL & CUMULATIVE CREDIT (As requested) */}
+        <div className="px-6 py-5 bg-white border-t border-slate-200 space-y-3">
+          {previousBalance > 0 && (
+            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl space-y-2">
+              <div className="flex items-center justify-between text-xs font-bold text-rose-900">
+                <span>🔴 Previous Unpaid Credit Balance:</span>
+                <span>{formatINR(previousBalance)}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs text-slate-700">
+                <span>➕ Current Purchase Bill:</span>
+                <span className="font-bold">{formatINR(amountPayable)}</span>
+              </div>
             </div>
-            <p className="text-xs sm:text-sm font-bold text-emerald-950/80 italic">
-              {amountInWords}
+          )}
+
+          <div className={`border-3 ${previousBalance > 0 ? 'border-rose-600 bg-gradient-to-br from-rose-50 via-amber-50/50 to-rose-100/70' : 'border-emerald-600 bg-gradient-to-br from-emerald-50 via-teal-50/60 to-emerald-100/70'} rounded-2xl p-5 text-center shadow-md`}>
+            <span className={`text-xs sm:text-sm font-black uppercase tracking-widest ${previousBalance > 0 ? 'text-rose-900' : 'text-emerald-900'} block`}>
+              {previousBalance > 0 ? 'TOTAL CUMULATIVE AMOUNT DUE' : 'GRAND TOTAL'}
+            </span>
+            <div className={`text-3xl sm:text-4xl font-black ${previousBalance > 0 ? 'text-rose-700' : 'text-emerald-800'} tracking-tight my-1`}>
+              {formatINR(previousBalance > 0 ? (cumulativeTotal || (previousBalance + amountPayable)) : amountPayable)}
+            </div>
+            <p className="text-xs sm:text-sm font-bold text-slate-700 italic">
+              {numberToIndianRupeeWords(previousBalance > 0 ? (cumulativeTotal || (previousBalance + amountPayable)) : amountPayable)}
             </p>
           </div>
         </div>

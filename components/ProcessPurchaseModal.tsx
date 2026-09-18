@@ -11,6 +11,8 @@ interface ProcessPurchaseModalProps {
   customerName: string;
   whatsappNumber: string;
   amountPayable: number;
+  previousBalance?: number;
+  cumulativeTotal?: number;
   sendWhatsApp: boolean;
   isProcessing: boolean;
   errorMessage?: string | null;
@@ -23,11 +25,15 @@ export function ProcessPurchaseModal({
   customerName,
   whatsappNumber,
   amountPayable,
+  previousBalance = 0,
+  cumulativeTotal,
   sendWhatsApp,
   isProcessing,
   errorMessage,
 }: ProcessPurchaseModalProps) {
   if (!isOpen) return null;
+
+  const totalCumulative = cumulativeTotal !== undefined ? cumulativeTotal : (previousBalance + amountPayable);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
@@ -39,7 +45,7 @@ export function ProcessPurchaseModal({
         <div className="flex items-center justify-between pb-3 border-b border-slate-100">
           <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
             <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-            Process Purchase
+            Process Credit Purchase
           </h3>
           <button
             onClick={onClose}
@@ -58,21 +64,38 @@ export function ProcessPurchaseModal({
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-slate-500">WhatsApp:</span>
-              <span className="font-medium text-slate-700">{whatsappNumber}</span>
+              <span className="font-medium text-slate-700 font-mono">{whatsappNumber}</span>
             </div>
             <div className="flex justify-between items-center text-sm pt-2 border-t border-slate-200">
-              <span className="font-bold text-slate-800">Amount Payable:</span>
-              <span className="text-lg font-extrabold text-emerald-700">
+              <span className="font-medium text-slate-700">This Purchase Amount:</span>
+              <span className="text-base font-bold text-slate-900">
                 {formatINR(amountPayable)}
               </span>
             </div>
+
+            {previousBalance > 0 && (
+              <>
+                <div className="flex justify-between items-center text-xs text-rose-600 font-medium">
+                  <span>Previous Unpaid Credit:</span>
+                  <span className="font-bold">{formatINR(previousBalance)}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm pt-2 border-t border-dashed border-rose-300 bg-rose-50/70 p-2.5 rounded-lg">
+                  <span className="font-black text-rose-950">Total Cumulative Due:</span>
+                  <span className="text-lg font-black text-rose-700">
+                    {formatINR(totalCumulative)}
+                  </span>
+                </div>
+              </>
+            )}
           </div>
 
           <div className="flex items-start gap-2.5 p-3 bg-emerald-50 rounded-xl text-xs text-emerald-800 border border-emerald-200">
             <Send className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" />
             <p>
               {sendWhatsApp
-                ? `Purchase summary will be saved and automatically sent to ${whatsappNumber} via official WhatsApp Business API.`
+                ? (previousBalance > 0
+                    ? `Credit bill & cumulative date-wise statement will be saved and sent to ${whatsappNumber}.`
+                    : `Purchase summary will be saved and sent to ${whatsappNumber} via official WhatsApp API.`)
                 : 'Purchase will be saved as Pending without sending a WhatsApp message.'}
             </p>
           </div>

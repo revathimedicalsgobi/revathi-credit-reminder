@@ -96,7 +96,50 @@ export class MetaWhatsAppClient implements IWhatsAppProvider {
 
     const paymentInfo = payload.upiId ? `\n💳 UPI ID: ${payload.upiId}` : '';
 
-    const textBody = 
+    const previousBal = Number(payload.previousBalance || 0);
+    const cumulativeTotal = Number(payload.cumulativeTotal || (previousBal + payload.amountPayable));
+
+    let textBody: string;
+
+    if (previousBal > 0) {
+      let dateWiseList = '';
+      if (payload.dateWisePendingBills && payload.dateWisePendingBills.length > 0) {
+        dateWiseList = payload.dateWisePendingBills
+          .map((b, idx) => `  ${idx + 1}. ${formatShortDate(b.date)}: ${formatINR(b.amount)}`)
+          .join('\n');
+      }
+
+      textBody = 
+`━━━━━━━━━━━━━━━━━━━━━━━
+🏥 *${payload.pharmacyName}*
+📋 *CREDIT BILL & CUMULATIVE STATEMENT*
+━━━━━━━━━━━━━━━━━━━━━━━
+
+Hello *${payload.customerName}*,
+
+Thank you for your visit. Here is your bill and cumulative account statement:
+
+📅 *Bill Date:* ${formattedDate}
+
+🛒 *Today's Items:*
+${itemsText}
+
+───────────────────────
+💵 *Today's Bill Amount:* *${formattedAmount}*
+───────────────────────
+
+📌 *Previous Unpaid Credit (Date-Wise):*
+${dateWiseList ? dateWiseList + '\n' : ''}• *Previous Outstanding:* ${formatINR(previousBal)}
+• *Today's New Purchase:* ${formattedAmount}
+
+━━━━━━━━━━━━━━━━━━━━━━━
+🔴 *TOTAL CUMULATIVE BALANCE DUE:* *${formatINR(cumulativeTotal)}*
+━━━━━━━━━━━━━━━━━━━━━━━${paymentInfo}
+
+Please settle the cumulative amount at your convenience.
+Thank you for choosing *${payload.pharmacyName}*! 🙏`;
+    } else {
+      textBody = 
 `━━━━━━━━━━━━━━━━━━━━━━━
 🏥 *${payload.pharmacyName}*
 📄 *PURCHASE SUMMARY*
@@ -113,12 +156,13 @@ ${itemsText}
 
 ───────────────────────
 *Total Amount Payable:* ${formattedAmount}
-*Payment Status:* ⏳ Pending
+*Payment Status:* ⏳ Pending (Credit)
 ───────────────────────${paymentInfo}
 
 Please complete the payment using the payment options provided.
 
 Thank you for your visit! 🙏`;
+    }
 
     const requestBody = {
       messaging_product: 'whatsapp',

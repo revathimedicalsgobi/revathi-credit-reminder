@@ -921,6 +921,8 @@ function NewPurchaseContent() {
               roundOff={calculation.round_off}
               amountPayable={calculation.amount_payable}
               paymentStatus="PENDING"
+              previousBalance={Number(matchedCustomer?.outstanding_balance || 0)}
+              cumulativeTotal={Number(matchedCustomer?.outstanding_balance || 0) + calculation.amount_payable}
               upiId={upiId}
               paymentQrUrl={paymentQrUrl}
               showPrintButton={true}
@@ -937,6 +939,8 @@ function NewPurchaseContent() {
         customerName={customerName || 'Customer'}
         whatsappNumber={normalizeWhatsAppNumber(whatsappNumber)}
         amountPayable={calculation.amount_payable}
+        previousBalance={Number(matchedCustomer?.outstanding_balance || 0)}
+        cumulativeTotal={Number(matchedCustomer?.outstanding_balance || 0) + calculation.amount_payable}
         sendWhatsApp={sendWhatsApp}
         isProcessing={isProcessing}
         errorMessage={formError}

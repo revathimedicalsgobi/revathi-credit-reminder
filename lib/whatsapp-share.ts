@@ -22,6 +22,12 @@ export interface WhatsAppShareData {
   amountPayable: number;
   pharmacyName?: string;
   upiId?: string | null;
+  previousBalance?: number;
+  cumulativeTotal?: number;
+  dateWisePendingBills?: Array<{
+    date: string | Date;
+    amount: number;
+  }>;
 }
 
 /**
@@ -36,18 +42,78 @@ export function formatPhoneForWhatsApp(phone: string): string {
 }
 
 /**
- * Builds polite greeting text message for WhatsApp Web (image is pasted below)
+ * Builds polite greeting & statement text message for WhatsApp Web (image is pasted below)
+ * If customer has previous unpaid credit, it formats the full cumulative date-wise statement.
  */
 export function buildWhatsAppSummaryText(data: WhatsAppShareData): string {
   const pharmacy = data.pharmacyName || 'Revathi Medicals & Distributors';
-  const payableStr = formatINR(data.amountPayable);
-  const upiLine = data.upiId ? `\n💳 *UPI ID:* ${data.upiId}` : '';
+  const billAmountStr = formatINR(data.amountPayable);
+  const dateStr = formatShortDate(data.purchaseDate);
+  const upiLine = data.upiId ? `\n💳 *UPI ID:* \`${data.upiId}\`` : '';
 
-  return `Hello *${data.customerName}*,
+  const itemsList = data.items && data.items.length > 0
+    ? data.items.map((i) => `• ${i.itemName} × ${i.quantity} = ${formatINR(i.netAmount)}`).join('\n')
+    : '';
 
-Please find your purchase summary bill from *${pharmacy}* attached below.
+  const previousBal = Number(data.previousBalance || 0);
+  const cumulativeTotal = Number(data.cumulativeTotal || (previousBal + data.amountPayable));
 
-💰 *Total Amount Payable:* *${payableStr}*${upiLine}
+  if (previousBal > 0) {
+    let dateWiseList = '';
+    if (data.dateWisePendingBills && data.dateWisePendingBills.length > 0) {
+      dateWiseList = data.dateWisePendingBills
+        .map((b, idx) => `  ${idx + 1}. ${formatShortDate(b.date)}: ${formatINR(b.amount)}`)
+        .join('\n');
+    }
+
+    return `━━━━━━━━━━━━━━━━━━━━━━━
+🏥 *${pharmacy.toUpperCase()}*
+📋 *CREDIT BILL & CUMULATIVE STATEMENT*
+━━━━━━━━━━━━━━━━━━━━━━━
+
+Hello *${data.customerName}*,
+
+Thank you for your visit. Here is your bill and cumulative account statement:
+
+📅 *Bill Date:* ${dateStr}
+
+🛒 *Today's Items:*
+${itemsList}
+
+───────────────────────
+💵 *Today's Bill Amount:* *${billAmountStr}*
+───────────────────────
+
+📌 *Previous Unpaid Credit (Date-Wise):*
+${dateWiseList ? dateWiseList + '\n' : ''}• *Previous Outstanding:* ${formatINR(previousBal)}
+• *Today's New Purchase:* ${billAmountStr}
+
+━━━━━━━━━━━━━━━━━━━━━━━
+🔴 *TOTAL CUMULATIVE BALANCE DUE:* *${formatINR(cumulativeTotal)}*
+━━━━━━━━━━━━━━━━━━━━━━━${upiLine}
+
+Please settle the cumulative amount at your convenience.
+Thank you for choosing *${pharmacy}*! 🙏`;
+  }
+
+  return `━━━━━━━━━━━━━━━━━━━━━━━
+🏥 *${pharmacy.toUpperCase()}*
+📄 *PURCHASE SUMMARY BILL*
+━━━━━━━━━━━━━━━━━━━━━━━
+
+Hello *${data.customerName}*,
+
+Thank you for your purchase from *${pharmacy}*.
+
+📅 *Date:* ${dateStr}
+
+🛒 *Items:*
+${itemsList}
+
+───────────────────────
+💰 *Total Amount Payable:* *${billAmountStr}*
+*Payment Status:* ⏳ Pending (Credit)
+───────────────────────${upiLine}
 
 Thank you for choosing *${pharmacy}*! 🙏`;
 }
@@ -118,6 +184,7 @@ export interface WhatsAppStatementData {
   pendingBills: Array<{
     date: string | Date;
     amount: number;
+    itemsSummary?: string;
   }>;
   pharmacyName?: string;
   upiId?: string | null;
@@ -131,34 +198,35 @@ export function buildWhatsAppCustomerStatementText(data: WhatsAppStatementData):
   const totalBilledStr = formatINR(data.totalBilled);
   const totalPaidStr = formatINR(data.totalPaid);
   const balanceStr = formatINR(data.outstandingBalance);
-  const upiLine = data.upiId ? `\n💳 *UPI ID:* ${data.upiId}` : '';
+  const upiLine = data.upiId ? `\n💳 *UPI ID:* \`${data.upiId}\`` : '';
 
   let pendingListText = '';
   if (data.pendingBills.length > 0) {
     const lines = data.pendingBills.map((b, idx) => {
       const dStr = formatShortDate(b.date);
       const amtStr = formatINR(b.amount);
-      return `${idx + 1}. ${dStr} - ${amtStr}`;
+      const itemNote = b.itemsSummary ? ` (${b.itemsSummary})` : '';
+      return `  ${idx + 1}. ${dStr}: *${amtStr}*${itemNote}`;
     });
-    pendingListText = `\n\n📌 *Pending Bills (${data.pendingBills.length}):*\n` + lines.join('\n');
+    pendingListText = `\n\n📌 *Date-Wise Pending Credit Bills (${data.pendingBills.length}):*\n` + lines.join('\n');
   }
 
   return `━━━━━━━━━━━━━━━━━━━━
 🏥 *${pharmacy.toUpperCase()}*
-📋 *ACCOUNT STATEMENT*
+📋 *COMPLETE ACCOUNT STATEMENT*
 ━━━━━━━━━━━━━━━━━━━━
 
 Hello *${data.customerName}*,
 
-Here is your current account statement with *${pharmacy}*:
+Here is your full account statement and balance summary from *${pharmacy}*:
 
-📊 *Summary:*
+📊 *Account Summary:*
 • Total Invoices: ${data.totalPurchasesCount}
 • Total Billed: *${totalBilledStr}*
 • Total Paid: *${totalPaidStr}*
-• 🔴 *Outstanding Balance:* *${balanceStr}*${pendingListText}${upiLine}
+• 🔴 *Total Cumulative Outstanding:* *${balanceStr}*${pendingListText}${upiLine}
 
-Please settle any outstanding balance at your earliest convenience.
+Please settle the cumulative outstanding balance at your earliest convenience.
 Thank you for choosing *${pharmacy}*! 🙏`;
 }
 
