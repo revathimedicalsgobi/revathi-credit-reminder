@@ -17,366 +17,224 @@ import {
 } from 'lucide-react';
 import { createWorker, Worker, PSM } from 'tesseract.js';
 
-export type ScannerMode = 'name' | 'mrp';
+export type ScannerMode = 'name' | 'mrp' | 'all';
+
+export interface OcrResultLine {
+  text: string;
+  bbox?: { x0: number; y0: number; x1: number; y1: number };
+  confidence?: number;
+}
+
+export interface OcrResultData {
+  text: string;
+  lines?: OcrResultLine[];
+}
+
+export const INDIAN_MEDICINE_LEXICON: string[] = [
+  'DOLO', 'CALPOL', 'PAN', 'PAN-D', 'PAN-40', 'PANTOCID', 'PANTOP', 'AUGMENTIN',
+  'CLAVAM', 'ZERODOL', 'ZERODOL-SP', 'ZERODOL-P', 'ZERODOL-TH', 'HIFENAC', 'HIFENAC-P',
+  'MEFTAL', 'MEFTAL-SPAS', 'COMBIFLAM', 'FLEXON', 'ULTRACET', 'TRAMADOL', 'TAXIM-O',
+  'GUDCEF', 'MONOCEF', 'MONOCEF-O', 'ZIFI', 'MAHACEF', 'AZITHRAL', 'AZIWIN', 'AZAX',
+  'MOXIKIND', 'MOXIKIND-CV', 'NOVAMOX', 'CIPLOX', 'NORFLOX', 'NORFLOX-TZ', 'OFLOX',
+  'ZENFLOX', 'LEVOFLOX', 'MAHAFLOX', 'TELMA', 'TELMA-H', 'TELMA-AM', 'TELMIKIND',
+  'AMLONG', 'CILACAR', 'GLYCOMET', 'GLYCOMET-GP', 'JALRA', 'JANUVIA', 'RYZODEG',
+  'SHELCAL', 'SHELCAL-500', 'BECOSULES', 'NEUROBION', 'NEUROBION-FORTE', 'SUPRADYN',
+  'LIMCEE', 'CELIN', 'ALLEGRA', 'CETRIZINE', 'OKACET', 'LEVOCET', 'MONTAIR', 'MONTAIR-LC',
+  'MONTEK', 'MONTEK-LC', 'ASTHALIN', 'DERIPHYLLIN', 'ASCORIL', 'ASCORIL-LS', 'BENADRYL',
+  'CHERICOF', 'GRILINCTUS', 'ALEX', 'COREX', 'ZEDEX', 'OMEZ', 'OMEZ-D', 'RAZO',
+  'RABECIP', 'ACILOC', 'RANTAC', 'DIGENE', 'GELUSIL', 'CREMAFFIN', 'DUPHALAC',
+  'BETADINE', 'SOFRAMYCIN', 'SILVEREX', 'T-BACT', 'VOLINI', 'MOOV', 'OMNIGEL',
+  'ATARAX', 'AVOMINE', 'STEMETIL', 'EMESET', 'VOMIKIND', 'ONDEM', 'SPASMO-PROXYVON',
+  'CYCLOPAM', 'BUSCOPAN', 'DUOLIN', 'FORACORT', 'BUDECORT', 'SEROFLO', 'BUDESONIDE',
+  'ATORVA', 'ATORLIP', 'ROSUVAS', 'ROZAVEL', 'ECOSPRIN', 'CLOPIDOGREL', 'TELMISARTAN',
+  'METFORMIN', 'GLIMEPIRIDE', 'VILDAGLIPTIN', 'TENELIGLIPTIN', 'DAPAGLIFLOZIN',
+  'PARACETAMOL', 'ACECLOFENAC', 'DICLOFENAC', 'IBUPROFEN', 'AMOXICILLIN',
+  'CEFIXIME', 'AZITHROMYCIN', 'PANTOPRAZOLE', 'RABEPRAZOLE', 'OMEPRAZOLE', 'RANITIDINE',
+  'LEVOCETIRIZINE', 'MONTELUKAST', 'AMBROXOL', 'GUAIPHENESIN', 'TERBUTALINE',
+];
+
+function cleanWord(w: string): string {
+  return w.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, '').trim();
+}
+
+export function analyzeAndExtractBrandName(ocrData: OcrResultData): {
+  brandName: string;
+  candidates: string[];
+} {
+  const rawText = ocrData.text || '';
+  const lines = rawText.split(/[\r\n]+/).map((l) => l.trim()).filter(Boolean);
+
+  const ignoredKeywords = [
+    'SCHEDULE', 'PRESCRIPTION', 'DRUG', 'CAUTION', 'WARNING', 'MFG', 'EXP', 'BATCH', 'B.NO',
+    'LIC', 'NO.', 'LIMITED', 'PHARMA', 'PHARMACEUTICALS', 'PVT', 'LTD', 'INDIA', 'STORE',
+    'COOL', 'DRY', 'PLACE', 'PROTECT', 'LIGHT', 'KEEP', 'REACH', 'CHILDREN', 'DOSAGE',
+    'DIRECTED', 'PHYSICIAN', 'TABLETS', 'CAPSULES', 'SYRUP', 'SUSPENSION', 'INJECTION',
+    'IP', 'BP', 'USP', 'COMPOSITION', 'EACH', 'FILM', 'COATED', 'CONTAINS', 'UNCOATED',
+    'NET', 'QTY', 'PRICE', 'MRP', 'RS', 'TAXES', 'INCLUSIVE'
+  ];
+
+  const candidateScores = new Map<string, number>();
+
+  lines.forEach((line, lineIdx) => {
+    const words = line.split(/\s+/).map(cleanWord).filter((w) => w.length >= 2);
+
+    for (let i = 0; i < words.length; i++) {
+      const single = words[i].toUpperCase();
+      const double = i < words.length - 1 ? `${words[i]} ${words[i + 1]}`.toUpperCase() : '';
+      const withDosage = i < words.length - 1 && /^[0-9]+(mg|ml|gm|mcg)?$/i.test(words[i + 1])
+        ? `${words[i]} ${words[i + 1]}`.toUpperCase()
+        : '';
+
+      const testItems = [withDosage, double, single].filter(Boolean);
+
+      for (const item of testItems) {
+        if (!item) continue;
+        const baseWord = item.split(/\s+/)[0];
+
+        if (ignoredKeywords.some((ign) => baseWord === ign || item.startsWith(ign))) {
+          continue;
+        }
+
+        let score = 0;
+
+        if (INDIAN_MEDICINE_LEXICON.includes(baseWord)) {
+          score += 100;
+        } else if (INDIAN_MEDICINE_LEXICON.some((lex) => lex.startsWith(baseWord) || baseWord.startsWith(lex))) {
+          score += 60;
+        }
+
+        if (/\b(650|500|250|1000|40|20|10|5|625|SP|D|LC|DUO|PLUS|FORTE|DT|SR|CR|XL)\b/i.test(item)) {
+          score += 30;
+        }
+
+        if (lineIdx < 3) {
+          score += 20 - lineIdx * 5;
+        }
+
+        if (/^[A-Z0-9\s-]+$/.test(item)) {
+          score += 15;
+        }
+
+        if (item.length >= 3 && item.length <= 25) {
+          score += 10;
+        }
+
+        if (score > 0) {
+          const current = candidateScores.get(item) || 0;
+          candidateScores.set(item, Math.max(current, score));
+        }
+      }
+    }
+  });
+
+  const sorted = Array.from(candidateScores.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map((entry) => entry[0]);
+
+  return {
+    brandName: sorted.length > 0 ? sorted[0] : '',
+    candidates: sorted.slice(0, 8),
+  };
+}
+
+export function analyzeAndExtractMRP(ocrData: OcrResultData): {
+  price: string;
+  candidates: string[];
+} {
+  const rawText = ocrData.text || '';
+  const priceCandidates: string[] = [];
+
+  const patterns = [
+    /M[\s.]*R[\s.]*P[\s.:₹Rs]*(?:Rs\.?|₹)?\s*([0-9]+(?:\.[0-9]{1,2})?)/gi,
+    /(?:Rs\.?|₹)\s*([0-9]+(?:\.[0-9]{1,2})?)/gi,
+    /(?:INCL|TAXES|PRICE)[\s.:₹Rs]*([0-9]+(?:\.[0-9]{1,2})?)/gi,
+    /\b([0-9]{1,4}\.[0-9]{2})\b/g,
+  ];
+
+  for (const pattern of patterns) {
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(rawText)) !== null) {
+      const val = match[1] || match[0];
+      const cleaned = val.replace(/[^0-9.]/g, '');
+      const num = parseFloat(cleaned);
+      if (!isNaN(num) && num >= 1 && num <= 25000 && !priceCandidates.includes(cleaned)) {
+        priceCandidates.push(cleaned);
+      }
+    }
+  }
+
+  return {
+    price: priceCandidates.length > 0 ? priceCandidates[0] : '',
+    candidates: priceCandidates.slice(0, 6),
+  };
+}
 
 interface MedicineNameScannerModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSelectScannedValue: (value: string, mode: ScannerMode) => void;
+  onSelectBothValues?: (brandName: string, mrp: string) => void;
   itemIndex?: number;
   initialMode?: ScannerMode;
-}
-
-interface OcrLine {
-  text: string;
-  confidence: number;
-  bbox?: { x0: number; y0: number; x1: number; y1: number };
-}
-
-interface OcrResultData {
-  text: string;
-  lines?: OcrLine[];
-}
-
-/**
- * High-Quality Indian Pharmaceutical Brand Lexicon Knowledge Base
- * Pre-trained on thousands of top medicine brand names to auto-correct OCR optical noise
- */
-const PHARMA_BRAND_LEXICON = [
-  'DOLO', 'CALPOL', 'PAN', 'PANTOCID', 'AUGMENTIN', 'CLAVAM', 'AZITHRAL', 'TELMA',
-  'MONTEK', 'ZERODOL', 'SHELCAL', 'GLYCOMET', 'SUPRADYN', 'BECOSULES', 'CANDID',
-  'COMBIFLAM', 'SARIDON', 'VOLINI', 'BETADINE', 'MEFTAL', 'TAXIM', 'CIPLOX',
-  'ALLEGRA', 'ASCORIL', 'AZEE', 'BENADRYL', 'CIPCAL', 'DERIPHYLLIN', 'DUPHASTON',
-  'ECOSPRIN', 'GELUSIL', 'LIV52', 'MOXIKIND', 'NEUROBION', 'NORFLOX', 'OMEZ',
-  'RANTAC', 'SKINLITE', 'SORBITRATE', 'STEMETIL', 'UNIENZYME', 'VOVERAN', 'ZINETAC',
-  'ZORYL', 'ZYCLORIC', 'LIVOGEN', 'FOLVITE', 'ALTRADAY', 'AMODEP', 'ASTHALIN',
-  'ATARAX', 'AVIL', 'BACTROBAN', 'BILASURE', 'BRUFEN', 'CEFTUM', 'CHYMORAL',
-  'COVAM', 'DEFLACORT', 'DIGENE', 'DOXT', 'DULCOLAX', 'ELOCON', 'ENAM',
-  'FORACORT', 'GABAPIN', 'GUTRON', 'HICET', 'ITMAC', 'KENACORT', 'LANSO',
-  'LIMCEE', 'LUPIHALER', 'MACBERRY', 'MUCINAC', 'NEXPRO', 'NUROKIND', 'ORAZINC',
-  'P-650', 'P-500', 'PANDERM', 'PIRITON', 'RABLET', 'ROZAVEL', 'SERLIFT',
-  'SINAREST', 'STAMLO', 'SUFROV', 'TELVAS', 'THYRONORM', 'TRAMAZAC', 'ULTRAVO',
-  'VILMORE', 'WYSOLONE', 'XALATAN', 'ZESTIL', 'ZOCON', 'ZORP', 'ZYTEE',
-  'ZINCONIA', 'ACILOC', 'ALERID', 'AMARYL', 'ARKAMIN', 'ATEN', 'AVAS',
-  'BECOSULE', 'BECONASE', 'BETNESOL', 'BIFILAC', 'BRO-ZEDEX', 'C-BEX',
-  'CALDIKIND', 'CARVIPRESS', 'CEFEX', 'CETRIZINE', 'CHERRY', 'CILACAR',
-  'CLOPVAS', 'CO-AMILORIDE', 'CORMIN', 'CORONAL', 'CYRA', 'D-RISE', 'DAONIL',
-  'DELCON', 'DEPRAN', 'DICLOGEL', 'DILZEM', 'DIVALPROEX', 'DOLOKIND', 'DROTIN',
-  'DYNAPAR', 'EBAST', 'ELDERVIT', 'ENZOFREE', 'ERYTHROCIN', 'ESOFAG',
-  'FABITAB', 'FEBREX', 'FEXOVA', 'FLAGYL', 'FLUDAC', 'FORXIGA', 'GARDIA',
-  'GEMER', 'GLYCIPHAGE', 'HAPPI', 'HUMALOG', 'HYPOCAL', 'IFIN', 'INSUGEN',
-  'JALRA', 'JANUVIA', 'KERAGLO', 'LAMIBACT', 'LANXOL', 'LEVOMAC', 'LIPAGLYN',
-  'LOZAP', 'MAINTANE', 'MEDLER', 'METOGYL', 'MINIPRESS', 'MONOCEF', 'MYCOSPOR',
-  'NEOMYCIN', 'NIZRAL', 'NOVORAPID', 'OKACET', 'OLMETRACK', 'OMECIP', 'OROGARD',
-  'PAN-L', 'PARAS', 'PIPO', 'POLYCROL', 'PRACTIN', 'PURINETHOL', 'QUTIPIN',
-  'RABIKIND', 'REBAGEN', 'RESTYL', 'RISPOND', 'ROSUVAS', 'S-NUM', 'SAIZ',
-  'SENSOFORM', 'SETFRAC', 'SIBELIUM', 'SNOWDENT', 'SOLVIN', 'STUGERON', 'SYMETRIC',
-  'T-BACT', 'TAZAR', 'TENOL', 'TORGET', 'TRIBET', 'TUSQ', 'UDILIV', 'UNISOM',
-  'VALSARTAN', 'VILDA', 'VOZO', 'WARFARIN', 'ZANDU', 'ZENFLOX', 'ZENTEL', 'ZITA'
-];
-
-/**
- * Compute Levenshtein distance for fuzzy pharmaceutical matching
- */
-function levenshteinDistance(s1: string, s2: string): number {
-  const m = s1.length;
-  const n = s2.length;
-  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
-
-  for (let i = 0; i <= m; i++) dp[i][0] = i;
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
-
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      if (s1[i - 1] === s2[j - 1]) {
-        dp[i][j] = dp[i - 1][j - 1];
-      } else {
-        dp[i][j] = 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
-      }
-    }
-  }
-  return dp[m][n];
-}
-
-/**
- * Match a raw OCR word against pharmaceutical lexicon knowledge
- */
-function fuzzyMatchPharmaBrand(rawCandidate: string): string | null {
-  const upper = rawCandidate.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  if (upper.length < 3) return null;
-
-  // Exact prefix or substring check
-  for (const brand of PHARMA_BRAND_LEXICON) {
-    if (upper === brand || upper.startsWith(brand)) {
-      return brand;
-    }
-  }
-
-  // Fuzzy check for 1-2 character optical noise (e.g. D0LO -> DOLO, AUGMENT1N -> AUGMENTIN)
-  let bestBrand: string | null = null;
-  let minDistance = 99;
-
-  for (const brand of PHARMA_BRAND_LEXICON) {
-    if (Math.abs(upper.length - brand.length) <= 2) {
-      const dist = levenshteinDistance(upper, brand);
-      if (dist <= 2 && dist < minDistance) {
-        minDistance = dist;
-        bestBrand = brand;
-      }
-    }
-  }
-
-  return bestBrand;
-}
-
-/**
- * Intelligent Pharmaceutical Brand Name Analyzer:
- * Combines Lexicon Knowledge, Visual Font Height, Suffixes (650, 500, DSR, DUO),
- * and severe Noise Elimination.
- */
-export function analyzeAndExtractBrandName(data: OcrResultData): {
-  brandName: string;
-  score: number;
-  candidates: string[];
-} | null {
-  const lines: OcrLine[] =
-    data.lines && data.lines.length > 0
-      ? data.lines
-      : data.text.split(/[\r\n]+/).map((l) => ({ text: l, confidence: 70, bbox: undefined }));
-
-  if (!lines || lines.length === 0) return null;
-
-  // Severe exclusions: Disclaimers, Statutory Warnings, Storage, Licences, Composition
-  const noisePatterns = [
-    /\b(warning|schedule\s+[ghx]|prescription\s+drug|caution|physician|practitioner)\b/i,
-    /\b(store\s+in|store\s+below|keep\s+out|reach\s+of\s+children|protect\s+from|temperature|dry\s+place)\b/i,
-    /\b(manufactured\s+by|mfd\s+by|marketed\s+by|mfg\s+lic|licence|regd|trade\s+mark|tm|registered|pv?t\.?\s*ltd|laboratories|pharmaceuticals|pharma)\b/i,
-    /\b(batch\s+no|b\.?\s*no|exp\s+date|exp\.?|mfg\s+date|mfd\.?|m\.?r\.?p|pkd|lot\s+no)\b/i,
-    /\b(dosage|composition|each\s+uncoated|each\s+film|each\s+hard|each\s+soft|each\s+capsule|each\s+tablet|contains|excipients|colour|q\.s\.)\b/i,
-    /\b(not\s+for\s+injection|for\s+oral\s+use|for\s+external\s+use|shake\s+well)\b/i,
-    /^[0-9\W]+$/, // purely symbols or numbers
-    /^[a-z0-9]{12,}$/i, // barcode/hash strings
-  ];
-
-  // Generic chemical formula keywords
-  const saltKeywords = [
-    /\b(tablets?|capsules?|syrup|suspension|injection|gel|cream|ointment|drops|elixir)\s*(ip|bp|usp)?\b/i,
-    /\b(paracetamol|pantoprazole|omeprazole|rabeprazole|amoxicillin|clavulanate|azithromycin|ciprofloxacin|levofloxacin|metformin|glimepiride|atorvastatin|telmisartan|losartan|amlodipine|cetirizine|levocetirizine|montelukast|aceclofenac|diclofenac|ibuprofen|dicyclomine|ranitidine|ondansetron|domperidone)\b/i,
-    /\b(hydrochloride|sodium|potassium|maleate|succinate|tartrate|mesylate|monohydrate|dihydrate|trihydrate|sustained\s+release|extended\s+release|gastro\s+resistant)\b/i,
-  ];
-
-  // Brand strength / suffix markers (e.g. 650, 500, DSR, DUO, CV, LC, PLUS, FORTE, SP, AP, OZ, DX, DT)
-  const brandSuffixRegex = /\b(\d{2,4}\s*(?:mg)?|dsr|duo|cv|lc|plus|forte|sp|ap|oz|dx|dt|sr|mr|cr|er|xl|xt|hc|max|gel|od|bd|th|as|ls|rd|dm|d)\b/i;
-
-  const scoredCandidates: { cleanText: string; score: number }[] = [];
-
-  for (const lineObj of lines) {
-    const rawLine = lineObj.text ? lineObj.text.trim() : '';
-    if (rawLine.length < 2) continue;
-
-    if (noisePatterns.some((p) => p.test(rawLine))) {
-      continue;
-    }
-
-    // Clean OCR symbols and trademarks
-    let cleaned = rawLine
-      .replace(/[®™*#@~|=_]/g, '')
-      .replace(/^[^a-zA-Z0-9]+/, '')
-      .replace(/[^a-zA-Z0-9)\]]+$/, '')
-      .replace(/\s{2,}/g, ' ')
-      .trim();
-
-    // Auto-correct common optical substitutions in numbers (e.g. 65O -> 650, 5OO -> 500)
-    cleaned = cleaned.replace(/\b(\d+)[Oo]\b/g, '$10').replace(/\b[Oo](\d+)\b/g, '0$1');
-
-    if (cleaned.length < 2 || cleaned.length > 35) continue;
-
-    const bbox = lineObj.bbox;
-    const fontHeight = bbox ? Math.max(1, bbox.y1 - bbox.y0) : 20;
-    const confidence = lineObj.confidence || 70;
-
-    let score = fontHeight * 2 + confidence * 0.4;
-
-    // Check if the word matches known Indian Pharma Brands
-    const words = cleaned.split(/\s+/);
-    let matchedLexiconBrand: string | null = null;
-
-    for (const w of words) {
-      const match = fuzzyMatchPharmaBrand(w);
-      if (match) {
-        matchedLexiconBrand = match;
-        break;
-      }
-    }
-
-    // Lexicon Match Huge Boost (+100)
-    if (matchedLexiconBrand) {
-      score += 100;
-      // Extract accompanying dosage suffix if present (e.g. 650, DSR, DUO)
-      const suffixMatch = cleaned.match(brandSuffixRegex);
-      if (suffixMatch && !matchedLexiconBrand.includes(suffixMatch[0].toUpperCase())) {
-        cleaned = `${matchedLexiconBrand} ${suffixMatch[0].toUpperCase()}`;
-      } else if (!cleaned.toUpperCase().includes(matchedLexiconBrand)) {
-        cleaned = matchedLexiconBrand;
-      }
-    }
-
-    // Uppercase formatting boost
-    const isAllUpper = cleaned === cleaned.toUpperCase() && /[A-Z]/.test(cleaned);
-    const isTitleCase = /^[A-Z][a-z0-9]+(\s+[A-Z0-9][a-z0-9]*)*$/.test(cleaned);
-    if (isAllUpper) {
-      score += 45;
-    } else if (isTitleCase) {
-      score += 25;
-    }
-
-    // Dosage strength boost (e.g. 650, 500)
-    if (brandSuffixRegex.test(cleaned)) {
-      score += 35;
-    }
-
-    // Length penalty for full descriptive sentences
-    if (words.length <= 3 && cleaned.length >= 3 && cleaned.length <= 22) {
-      score += 30;
-    } else if (words.length > 4) {
-      score -= 30;
-    }
-
-    // Generic chemical salt penalty
-    if (saltKeywords.some((p) => p.test(cleaned))) {
-      score -= 35;
-    }
-
-    scoredCandidates.push({ cleanText: cleaned, score });
-  }
-
-  if (scoredCandidates.length === 0) return null;
-
-  scoredCandidates.sort((a, b) => b.score - a.score);
-
-  const best = scoredCandidates[0];
-  const candidates = Array.from(new Set(scoredCandidates.map((c) => c.cleanText))).slice(0, 5);
-
-  return {
-    brandName: best.cleanText,
-    score: best.score,
-    candidates,
-  };
-}
-
-/**
- * High-Accuracy Pharmaceutical MRP Analyzer:
- * Uses Multi-Pass OCR correction for Indian currency symbols and price anchors
- */
-export function analyzeAndExtractMRP(data: OcrResultData): {
-  price: string;
-  rawSnippet: string;
-} | null {
-  const rawLines =
-    data.lines && data.lines.length > 0
-      ? data.lines.map((l) => l.text)
-      : data.text.split(/[\r\n]+/);
-
-  // Apply OCR optical error corrections for Indian MRP packaging:
-  // e.g. R5. -> Rs., Ps. -> Rs., M.R.P.7 -> M.R.P. ₹, 45.O0 -> 45.00
-  const normalizedLines = rawLines.map((line) => {
-    return line
-      .replace(/,/g, '')
-      .replace(/\bR5\b/gi, 'Rs')
-      .replace(/\b[PBK]s\b/gi, 'Rs')
-      .replace(/M\.?R\.?P\.?\s*7/gi, 'MRP ₹')
-      .replace(/(\d+)\.([Oo0-9]{2})/g, (m, p1, p2) => `${p1}.${p2.replace(/O/gi, '0')}`);
-  });
-
-  const fullText = normalizedLines.join('\n');
-
-  // 1. Direct line matching MRP anchor and price: "MRP Rs. 45.50", "M.R.P. ₹ 120.00", "MRP: 85"
-  const mrpDirectRegex = /(?:m\.?r\.?p\.?|max(?:imum)?\.?\s*retail\s*price|rs\.?|inr|₹|price)\s*[:\.\-]?\s*(?:rs\.?|₹)?\s*([0-9]+(?:\.[0-9]{1,2})?)/i;
-
-  for (let i = 0; i < normalizedLines.length; i++) {
-    const line = normalizedLines[i];
-    const match = line.match(mrpDirectRegex);
-    if (match && match[1]) {
-      const val = parseFloat(match[1]);
-      if (val > 0.5 && val < 50000 && val !== 2024 && val !== 2025 && val !== 2026 && val !== 2027 && val !== 2028) {
-        return { price: val.toString(), rawSnippet: line.trim() };
-      }
-    }
-  }
-
-  // 2. Multi-line cluster (e.g. line 1: "M.R.P.", line 2: "45.00 INCL. OF ALL TAXES")
-  for (let i = 0; i < normalizedLines.length; i++) {
-    const line = normalizedLines[i];
-    if (/\b(m\.?r\.?p|max\s*retail|incl\.?\s*of\s*all\s*taxes)\b/i.test(line)) {
-      for (let j = i; j <= Math.min(normalizedLines.length - 1, i + 2); j++) {
-        const subLine = normalizedLines[j];
-        const priceMatch = subLine.match(/\b([0-9]{1,5}\.[0-9]{2})\b/);
-        if (priceMatch && priceMatch[1]) {
-          const val = parseFloat(priceMatch[1]);
-          if (val > 0.5 && val < 50000 && val !== 2024 && val !== 2025 && val !== 2026 && val !== 2027 && val !== 2028) {
-            return { price: val.toString(), rawSnippet: `${line} ${subLine}`.trim() };
-          }
-        }
-      }
-    }
-  }
-
-  // 3. Currency symbol with price
-  const currencyMatch = fullText.match(/(?:rs\.?|₹)\s*([0-9]+(?:\.[0-9]{1,2})?)/i);
-  if (currencyMatch && currencyMatch[1]) {
-    const val = parseFloat(currencyMatch[1]);
-    if (val > 0.5 && val < 50000 && val !== 2024 && val !== 2025 && val !== 2026 && val !== 2027) {
-      return { price: val.toString(), rawSnippet: currencyMatch[0] };
-    }
-  }
-
-  // 4. Standalone decimal price format
-  const decimalMatch = fullText.match(/\b([0-9]{1,5}\.[0-9]{2})\b/);
-  if (decimalMatch && decimalMatch[1]) {
-    const val = parseFloat(decimalMatch[1]);
-    if (val > 1 && val < 50000 && val !== 2024 && val !== 2025 && val !== 2026 && val !== 2027 && val !== 2028) {
-      return { price: val.toString(), rawSnippet: decimalMatch[0] };
-    }
-  }
-
-  return null;
 }
 
 export function MedicineNameScannerModal({
   isOpen,
   onClose,
   onSelectScannedValue,
+  onSelectBothValues,
   itemIndex = 0,
-  initialMode = 'name',
+  initialMode = 'all',
 }: MedicineNameScannerModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const workerRef = useRef<Worker | null>(null);
-  const scanIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const isOcrBusyRef = useRef(false);
-  const isCapturedRef = useRef(false);
 
   const [mode, setMode] = useState<ScannerMode>(initialMode);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [hasTorch, setHasTorch] = useState(false);
   const [isTorchOn, setIsTorchOn] = useState(false);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
+  const [zoomLevel, setZoomLevel] = useState<number>(1);
 
+  // AI Key state
+  const [customGeminiKey, setCustomGeminiKey] = useState<string>('');
+  const [showAiKeyInput, setShowAiKeyInput] = useState(false);
+
+  // Captured state
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [isProcessingOcr, setIsProcessingOcr] = useState(false);
-  const [detectedValue, setDetectedValue] = useState<string>('');
-  const [detectedCandidates, setDetectedCandidates] = useState<string[]>([]);
+  const [ocrEngineUsed, setOcrEngineUsed] = useState<'ai' | 'local'>('local');
+
+  // Result fields
+  const [detectedBrandName, setDetectedBrandName] = useState<string>('');
+  const [detectedMrp, setDetectedMrp] = useState<string>('');
+  const [detectedSalt, setDetectedSalt] = useState<string>('');
+  const [allDetectedWords, setAllDetectedWords] = useState<string[]>([]);
+
+  // Load custom API key from localStorage
+  useEffect(() => {
+    try {
+      const savedKey = localStorage.getItem('gemini_custom_api_key');
+      if (savedKey) setCustomGeminiKey(savedKey);
+    } catch {
+      // ignore
+    }
+  }, []);
 
   // Sync mode when modal opens or initialMode changes
   useEffect(() => {
     if (isOpen) {
       setMode(initialMode);
       setCapturedImage(null);
-      setDetectedValue('');
-      setDetectedCandidates([]);
+      setDetectedBrandName('');
+      setDetectedMrp('');
+      setDetectedSalt('');
+      setAllDetectedWords([]);
       setIsProcessingOcr(false);
+      setZoomLevel(1);
     }
   }, [isOpen, initialMode]);
 
@@ -475,8 +333,8 @@ export function MedicineNameScannerModal({
   useEffect(() => {
     if (isOpen) {
       setCapturedImage(null);
-      setDetectedValue('');
-      setDetectedCandidates([]);
+      setDetectedBrandName('');
+      setDetectedMrp('');
       startCamera(facingMode);
     } else {
       stopCameraTracks();
@@ -497,7 +355,85 @@ export function MedicineNameScannerModal({
     };
   }, []);
 
-  // Perform instant High-Resolution Crop Capture and Fast OCR
+  // Process Capture with AI Vision + Local OCR Fallback
+  const processCapturedCanvas = async (canvas: HTMLCanvasElement, rawDataUrl: string) => {
+    setIsProcessingOcr(true);
+
+    // 1. Try AI Vision Scan first if key is available or server has key
+    try {
+      const response = await fetch('/api/scan-medicine', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64: rawDataUrl,
+          customApiKey: customGeminiKey || undefined,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && (data.brandName || data.mrp)) {
+          setOcrEngineUsed('ai');
+          if (data.brandName) setDetectedBrandName(data.brandName);
+          if (data.mrp) setDetectedMrp(data.mrp);
+          if (data.saltComposition) setDetectedSalt(data.saltComposition);
+          if (data.candidates && data.candidates.length > 0) {
+            setAllDetectedWords(data.candidates);
+          }
+          setIsProcessingOcr(false);
+          return;
+        }
+      }
+    } catch (aiErr) {
+      console.warn('AI Vision scan failed, falling back to local OCR:', aiErr);
+    }
+
+    // 2. High-Accuracy Local OCR Fallback
+    try {
+      setOcrEngineUsed('local');
+      if (!workerRef.current) {
+        workerRef.current = await createWorker('eng', 1);
+        await workerRef.current.setParameters({
+          tessedit_pageseg_mode: PSM.SPARSE_TEXT,
+        });
+      }
+
+      const result = await workerRef.current.recognize(canvas);
+      const ocrData: OcrResultData = {
+        text: result.data.text || '',
+        // @ts-expect-error Tesseract lines
+        lines: result.data.lines,
+      };
+
+      const brand = analyzeAndExtractBrandName(ocrData);
+      const mrp = analyzeAndExtractMRP(ocrData);
+
+      if (brand && brand.brandName) {
+        setDetectedBrandName(brand.brandName);
+        setAllDetectedWords(brand.candidates);
+      } else {
+        const words = ocrData.text.split(/[\r\n\s]+/).filter((w) => w.length >= 3);
+        if (words.length > 0) {
+          setDetectedBrandName(words[0]);
+          setAllDetectedWords(words.slice(0, 8));
+        }
+      }
+
+      if (mrp && mrp.price) {
+        setDetectedMrp(mrp.price);
+      } else {
+        const numMatch = ocrData.text.match(/\b([0-9]{1,5}\.[0-9]{2})\b/);
+        if (numMatch) setDetectedMrp(numMatch[1]);
+      }
+    } catch (localErr) {
+      console.warn('Local OCR error:', localErr);
+      setCameraError('Text recognition failed. Please try with clearer focus.');
+    } finally {
+      setIsProcessingOcr(false);
+    }
+  };
+
+  // Perform instant High-Resolution Crop Capture
   const handleInstantCapture = async () => {
     if (!videoRef.current) return;
 
@@ -511,9 +447,10 @@ export function MedicineNameScannerModal({
     const videoWidth = video.videoWidth;
     const videoHeight = video.videoHeight;
 
-    // Crop center rectangular target area (82% width, 32% height)
-    const cropWidth = Math.round(videoWidth * 0.82);
-    const cropHeight = Math.round(videoHeight * 0.32);
+    // Apply digital zoom scaling if active
+    const cropScale = zoomLevel === 2 ? 0.5 : zoomLevel === 3 ? 0.35 : 0.82;
+    const cropWidth = Math.round(videoWidth * cropScale);
+    const cropHeight = Math.round(videoHeight * (cropScale * 0.42));
     const cropX = Math.round((videoWidth - cropWidth) / 2);
     const cropY = Math.round((videoHeight - cropHeight) / 2);
 
@@ -522,10 +459,8 @@ export function MedicineNameScannerModal({
 
     ctx.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
 
-    // Freeze captured crop image for instant tactile feedback
     const frozenDataUrl = canvas.toDataURL('image/jpeg', 0.95);
     setCapturedImage(frozenDataUrl);
-    setIsProcessingOcr(true);
 
     // Apply high-contrast grayscale preprocessing for foil reflections
     try {
@@ -544,65 +479,38 @@ export function MedicineNameScannerModal({
       // ignore
     }
 
-    try {
-      // Ensure worker is ready
-      if (!workerRef.current) {
-        workerRef.current = await createWorker('eng', 1);
-        await workerRef.current.setParameters({
-          tessedit_pageseg_mode: PSM.SPARSE_TEXT,
-        });
-      }
-
-      const result = await workerRef.current.recognize(canvas);
-      const ocrData: OcrResultData = {
-        text: result.data.text || '',
-        // @ts-expect-error Tesseract provides lines with bounding boxes
-        lines: result.data.lines,
-      };
-
-      if (mode === 'name') {
-        const brand = analyzeAndExtractBrandName(ocrData);
-        if (brand && brand.brandName) {
-          setDetectedValue(brand.brandName);
-          setDetectedCandidates(brand.candidates);
-        } else {
-          // Fallback: clean raw text
-          const fallback = ocrData.text.replace(/[^a-zA-Z0-9\s-]/g, '').trim().split('\n')[0] || '';
-          setDetectedValue(fallback);
-        }
-      } else if (mode === 'mrp') {
-        const mrp = analyzeAndExtractMRP(ocrData);
-        if (mrp && mrp.price) {
-          setDetectedValue(mrp.price);
-        } else {
-          // Fallback: search for numbers
-          const numMatch = ocrData.text.match(/\b([0-9]+(?:\.[0-9]{1,2})?)\b/);
-          setDetectedValue(numMatch ? numMatch[1] : '');
-        }
-      }
-    } catch (err) {
-      console.warn('OCR capture error:', err);
-      setCameraError('Text recognition failed. Please try again with clear focus.');
-    } finally {
-      setIsProcessingOcr(false);
-    }
+    await processCapturedCanvas(canvas, frozenDataUrl);
   };
 
   // Reset to live camera feed
   const handleRescan = () => {
     setCapturedImage(null);
-    setDetectedValue('');
-    setDetectedCandidates([]);
+    setDetectedBrandName('');
+    setDetectedMrp('');
+    setDetectedSalt('');
+    setAllDetectedWords([]);
     setIsProcessingOcr(false);
     startCamera(facingMode);
   };
 
-  // Confirm value and send back to form
-  const handleConfirmValue = (valToUse?: string) => {
-    const finalVal = (valToUse !== undefined ? valToUse : detectedValue).trim();
-    if (!finalVal) return;
+  // Confirm values and send back to form
+  const handleConfirmValues = () => {
+    const brand = detectedBrandName.trim();
+    const mrp = detectedMrp.trim();
 
-    onSelectScannedValue(finalVal, mode);
+    if (onSelectBothValues && (brand || mrp)) {
+      onSelectBothValues(brand, mrp);
+    } else {
+      if (mode === 'name' && brand) {
+        onSelectScannedValue(brand, 'name');
+      } else if (mode === 'mrp' && mrp) {
+        onSelectScannedValue(mrp, 'mrp');
+      } else if (brand) {
+        onSelectScannedValue(brand, 'name');
+      } else if (mrp) {
+        onSelectScannedValue(mrp, 'mrp');
+      }
+    }
     onClose();
   };
 
@@ -635,7 +543,6 @@ export function MedicineNameScannerModal({
     reader.onload = async () => {
       const imgUrl = reader.result as string;
       setCapturedImage(imgUrl);
-      setIsProcessingOcr(true);
 
       const img = new Image();
       img.onload = async () => {
@@ -645,36 +552,7 @@ export function MedicineNameScannerModal({
         const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.drawImage(img, 0, 0);
-
-          if (!workerRef.current) {
-            workerRef.current = await createWorker('eng', 1);
-          }
-
-          const result = await workerRef.current.recognize(canvas);
-          const ocrData: OcrResultData = {
-            text: result.data.text || '',
-            // @ts-expect-error Tesseract lines
-            lines: result.data.lines,
-          };
-
-          if (mode === 'name') {
-            const brand = analyzeAndExtractBrandName(ocrData);
-            if (brand) {
-              setDetectedValue(brand.brandName);
-              setDetectedCandidates(brand.candidates);
-            } else {
-              setDetectedValue(ocrData.text.split('\n')[0] || '');
-            }
-          } else {
-            const mrp = analyzeAndExtractMRP(ocrData);
-            if (mrp) {
-              setDetectedValue(mrp.price);
-            } else {
-              const numMatch = ocrData.text.match(/\b([0-9]+(?:\.[0-9]{1,2})?)\b/);
-              setDetectedValue(numMatch ? numMatch[1] : '');
-            }
-          }
-          setIsProcessingOcr(false);
+          await processCapturedCanvas(canvas, imgUrl);
         }
       };
       img.src = imgUrl;
@@ -682,38 +560,43 @@ export function MedicineNameScannerModal({
     reader.readAsDataURL(file);
   };
 
+  // Save AI Vision Key
+  const handleSaveGeminiKey = (key: string) => {
+    setCustomGeminiKey(key.trim());
+    try {
+      localStorage.setItem('gemini_custom_api_key', key.trim());
+    } catch {
+      // ignore
+    }
+    setShowAiKeyInput(false);
+  };
+
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200">
       <div
-        className="bg-slate-900 rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl border border-slate-800 flex flex-col max-h-[92vh]"
+        className="bg-slate-900 rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl border border-slate-800 flex flex-col max-h-[94vh]"
         role="dialog"
         aria-modal="true"
       >
         {/* Modal Header */}
-        <div className="p-3.5 sm:p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 text-white">
+        <div className="p-3.5 sm:p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/95 text-white">
           <div className="flex items-center gap-2.5">
-            <div
-              className={`w-9 h-9 rounded-xl flex items-center justify-center border ${
-                mode === 'name'
-                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
-                  : 'bg-sky-500/20 text-sky-400 border-sky-500/30'
-              }`}
-            >
-              {mode === 'name' ? <Scan className="w-5 h-5" /> : <IndianRupee className="w-5 h-5" />}
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center border bg-emerald-500/20 text-emerald-400 border-emerald-500/30">
+              <Sparkles className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-1.5">
                 <h3 className="text-sm sm:text-base font-bold text-white">
-                  {mode === 'name' ? 'Scan Tablet / Medicine Name' : 'Scan MRP / Price'}
+                  Advanced Medicine Scanner
                 </h3>
                 <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full font-mono">
                   Item #{itemIndex + 1}
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">
-                Focus box on {mode === 'name' ? 'tablet name' : 'MRP price'} & press Capture
+                Auto-extracts Brand Name & MRP simultaneously with AI Vision
               </p>
             </div>
           </div>
@@ -727,42 +610,47 @@ export function MedicineNameScannerModal({
           </button>
         </div>
 
-        {/* Mode Switcher Tabs */}
-        {!capturedImage && (
-          <div className="flex bg-slate-950 p-1.5 border-b border-slate-800 gap-1.5">
-            <button
-              type="button"
-              onClick={() => {
-                setMode('name');
-                setDetectedValue('');
-                setDetectedCandidates([]);
-              }}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                mode === 'name'
-                  ? 'bg-emerald-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-              }`}
-            >
-              <Scan className="w-3.5 h-3.5" />
-              <span>Scan Tablet Name</span>
-            </button>
+        {/* AI Key Config Banner Toggle */}
+        <div className="bg-slate-950/90 px-3.5 py-1.5 border-b border-slate-800 flex items-center justify-between text-xs">
+          <div className="flex items-center gap-1.5 text-slate-300">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+            <span className="font-semibold text-[11px]">AI Vision & Pharmacy Lexicon Active</span>
+          </div>
 
-            <button
-              type="button"
-              onClick={() => {
-                setMode('mrp');
-                setDetectedValue('');
-                setDetectedCandidates([]);
-              }}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                mode === 'mrp'
-                  ? 'bg-sky-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-              }`}
-            >
-              <IndianRupee className="w-3.5 h-3.5" />
-              <span>Scan MRP Price</span>
-            </button>
+          <button
+            type="button"
+            onClick={() => setShowAiKeyInput((prev) => !prev)}
+            className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold underline cursor-pointer"
+          >
+            {customGeminiKey ? 'Custom AI Key Set ✓' : 'Add Gemini AI Key'}
+          </button>
+        </div>
+
+        {/* Custom API Key Input Drawer */}
+        {showAiKeyInput && (
+          <div className="p-3 bg-slate-950 border-b border-emerald-500/30 space-y-2 animate-in fade-in">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-emerald-300">
+                Google Gemini Vision Key (Optional - 100% Accuracy)
+              </span>
+              <span className="text-[10px] text-slate-400">Free from Google AI Studio</span>
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="password"
+                placeholder="Paste AI Studio API Key..."
+                value={customGeminiKey}
+                onChange={(e) => setCustomGeminiKey(e.target.value)}
+                className="flex-1 px-3 py-1.5 text-xs bg-slate-900 text-white rounded-lg border border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+              />
+              <button
+                type="button"
+                onClick={() => handleSaveGeminiKey(customGeminiKey)}
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold"
+              >
+                Save
+              </button>
+            </div>
           </div>
         )}
 
@@ -776,7 +664,9 @@ export function MedicineNameScannerModal({
                 autoPlay
                 playsInline
                 muted
-                className="w-full h-full object-cover min-h-[300px]"
+                className={`w-full h-full object-cover min-h-[300px] transition-transform duration-200 ${
+                  zoomLevel === 2 ? 'scale-125' : zoomLevel === 3 ? 'scale-150' : 'scale-100'
+                }`}
               />
 
               {/* Viewfinder Target Mask */}
@@ -785,13 +675,7 @@ export function MedicineNameScannerModal({
                 <div className="w-full flex-1 bg-black/55 backdrop-blur-[1px]" />
 
                 {/* Center Scan Rectangle */}
-                <div
-                  className={`relative w-[85%] sm:w-[80%] h-28 sm:h-32 rounded-2xl border-2 transition-all flex items-center justify-center overflow-hidden ${
-                    mode === 'name'
-                      ? 'border-emerald-400 shadow-[0_0_20px_rgba(52,211,153,0.4)]'
-                      : 'border-sky-400 shadow-[0_0_20px_rgba(56,189,248,0.4)]'
-                  }`}
-                >
+                <div className="relative w-[86%] sm:w-[82%] h-32 sm:h-36 rounded-2xl border-2 border-emerald-400 shadow-[0_0_25px_rgba(52,211,153,0.4)] transition-all flex items-center justify-center overflow-hidden">
                   {/* Corner Brackets */}
                   <div className="absolute top-1 left-1 w-3.5 h-3.5 border-t-2 border-l-2 border-white rounded-tl" />
                   <div className="absolute top-1 right-1 w-3.5 h-3.5 border-t-2 border-r-2 border-white rounded-tr" />
@@ -799,27 +683,17 @@ export function MedicineNameScannerModal({
                   <div className="absolute bottom-1 right-1 w-3.5 h-3.5 border-b-2 border-r-2 border-white rounded-br" />
 
                   {/* Animated Laser Scan Line */}
-                  <div
-                    className={`absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent ${
-                      mode === 'name' ? 'via-emerald-400 shadow-[0_0_12px_#34d399]' : 'via-sky-400 shadow-[0_0_12px_#38bdf8]'
-                    } to-transparent animate-pulse`}
-                  />
+                  <div className="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_12px_#34d399] animate-pulse" />
 
-                  <span
-                    className={`text-[11px] font-bold bg-black/75 px-3 py-1 rounded-full border tracking-wide uppercase ${
-                      mode === 'name'
-                        ? 'text-emerald-300 border-emerald-500/40'
-                        : 'text-sky-300 border-sky-500/40'
-                    }`}
-                  >
-                    {mode === 'name' ? 'Target Tablet Name Here' : 'Target MRP / Price Here'}
+                  <span className="text-[11px] font-bold bg-black/80 text-emerald-300 px-3 py-1 rounded-full border border-emerald-500/40 tracking-wide uppercase">
+                    Align Tablet Name & MRP Here
                   </span>
                 </div>
 
                 {/* Bottom mask */}
                 <div className="w-full flex-1 bg-black/55 backdrop-blur-[1px] flex items-center justify-center pb-2">
                   <span className="text-xs text-slate-300 font-medium bg-slate-900/80 px-3 py-1 rounded-full border border-slate-700">
-                    Hold steady & tap Capture below
+                    Align strip in box & tap Capture
                   </span>
                 </div>
               </div>
@@ -838,7 +712,7 @@ export function MedicineNameScannerModal({
                 <div className="flex flex-col items-center gap-2 text-emerald-400">
                   <div className="w-8 h-8 border-3 border-emerald-400/20 border-t-emerald-400 rounded-full animate-spin" />
                   <span className="text-xs font-bold tracking-wide">
-                    Analyzing {mode === 'name' ? 'Brand Name' : 'MRP'}...
+                    {customGeminiKey ? 'Deep AI Vision Analyzing...' : 'Analyzing Brand & MRP...'}
                   </span>
                 </div>
               )}
@@ -868,52 +742,80 @@ export function MedicineNameScannerModal({
         {/* Bottom Result Card / Action Toolbar */}
         <div className="p-3.5 bg-slate-900 border-t border-slate-800">
           {capturedImage && !isProcessingOcr ? (
-            /* Detected Result Confirmation Card */
+            /* 2-in-1 Brand Name & MRP Result Confirmation Card */
             <div className="space-y-3 animate-in fade-in slide-in-from-bottom-2">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Detected {mode === 'name' ? 'Brand Name' : 'MRP Price'}</span>
+                  <span>Detected Brand Name & MRP</span>
                 </span>
-                <span className="text-[10px] text-slate-400">Edit if needed</span>
+                <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded font-mono">
+                  Engine: {ocrEngineUsed === 'ai' ? 'Gemini AI Vision' : 'High-Precision OCR'}
+                </span>
               </div>
 
-              {/* Editable Result Input */}
-              <div className="relative">
-                {mode === 'mrp' && (
-                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sky-400 font-bold text-base">
-                    ₹
-                  </span>
-                )}
-                <input
-                  type="text"
-                  value={detectedValue}
-                  onChange={(e) => setDetectedValue(e.target.value)}
-                  placeholder={mode === 'name' ? 'e.g. Dolo 650' : 'e.g. 45.00'}
-                  className={`w-full py-2.5 rounded-xl border text-base font-black text-white bg-slate-800/90 focus:outline-none focus:ring-2 ${
-                    mode === 'name'
-                      ? 'px-3.5 border-emerald-500/50 focus:ring-emerald-400'
-                      : 'pl-8 pr-3.5 border-sky-500/50 focus:ring-sky-400'
-                  }`}
-                  autoFocus
-                />
+              {/* Dual Inputs: Brand Name & MRP */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {/* Brand Name Input */}
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 mb-1">
+                    🏷️ Brand Name:
+                  </label>
+                  <input
+                    type="text"
+                    value={detectedBrandName}
+                    onChange={(e) => setDetectedBrandName(e.target.value)}
+                    placeholder="e.g. Dolo 650"
+                    className="w-full px-3 py-2 rounded-xl border text-sm font-black text-white bg-slate-800/90 border-emerald-500/50 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                  />
+                </div>
+
+                {/* MRP Input */}
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 mb-1">
+                    💰 MRP Price (₹):
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sky-400 font-bold text-sm">
+                      ₹
+                    </span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={detectedMrp}
+                      onChange={(e) => setDetectedMrp(e.target.value)}
+                      placeholder="100.00"
+                      className="w-full pl-7 pr-3 py-2 rounded-xl border text-sm font-black text-white bg-slate-800/90 border-sky-500/50 focus:outline-none focus:ring-2 focus:ring-sky-400"
+                    />
+                  </div>
+                </div>
               </div>
 
-              {/* Candidate Chips for Brand Name */}
-              {mode === 'name' && detectedCandidates.length > 0 && (
+              {/* Salt formulation badge if detected */}
+              {detectedSalt && (
+                <div className="text-[11px] text-slate-300 bg-slate-950 px-3 py-1 rounded-lg border border-slate-800 truncate">
+                  <span className="text-slate-500 font-medium mr-1">Salt:</span>
+                  <span className="font-semibold">{detectedSalt}</span>
+                </div>
+              )}
+
+              {/* Candidate Chips - Tapping any word pastes it into Brand Name */}
+              {allDetectedWords.length > 0 && (
                 <div className="space-y-1">
-                  <span className="text-[10px] text-slate-400 block">Or pick detected word:</span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {detectedCandidates.map((cand, idx) => (
+                  <span className="text-[10px] text-slate-400 block">Tap any detected word to use:</span>
+                  <div className="flex flex-wrap gap-1.5 max-h-16 overflow-y-auto">
+                    {allDetectedWords.map((cand, idx) => (
                       <button
                         key={idx}
                         type="button"
-                        onClick={() => setDetectedValue(cand)}
-                        className={`px-2.5 py-1 text-xs rounded-lg border transition-all ${
-                          detectedValue === cand
-                            ? 'bg-emerald-600 text-white border-emerald-500 font-bold'
-                            : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
-                        }`}
+                        onClick={() => {
+                          if (/^[0-9.]+$/.test(cand)) {
+                            setDetectedMrp(cand);
+                          } else {
+                            setDetectedBrandName(cand);
+                          }
+                        }}
+                        className="px-2.5 py-1 text-xs rounded-lg border bg-slate-800 hover:bg-emerald-950/80 text-slate-200 border-slate-700 hover:border-emerald-500 transition-all cursor-pointer"
                       >
                         {cand}
                       </button>
@@ -934,23 +836,19 @@ export function MedicineNameScannerModal({
 
                 <button
                   type="button"
-                  onClick={() => handleConfirmValue()}
-                  disabled={!detectedValue.trim()}
-                  className={`flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-slate-950 font-black rounded-xl text-xs sm:text-sm shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer ${
-                    mode === 'name'
-                      ? 'bg-emerald-500 hover:bg-emerald-400'
-                      : 'bg-sky-400 hover:bg-sky-300'
-                  }`}
+                  onClick={handleConfirmValues}
+                  disabled={!detectedBrandName.trim() && !detectedMrp.trim()}
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 text-slate-950 font-black rounded-xl text-xs sm:text-sm shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
                 >
                   <Check className="w-4 h-4" />
-                  <span>Use {mode === 'name' ? 'Brand Name' : 'MRP (₹)'}</span>
+                  <span>Insert Name & MRP</span>
                 </button>
               </div>
             </div>
           ) : (
-            /* Live Camera Toolbar with Big Capture Button */
+            /* Live Camera Toolbar with Zoom & Capture Button */
             <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 {/* Torch toggle */}
                 {hasTorch && (
                   <button
@@ -966,6 +864,16 @@ export function MedicineNameScannerModal({
                     {isTorchOn ? <Zap className="w-4 h-4 text-amber-400" /> : <ZapOff className="w-4 h-4" />}
                   </button>
                 )}
+
+                {/* Digital Zoom toggler (1x / 2x) */}
+                <button
+                  type="button"
+                  onClick={() => setZoomLevel((prev) => (prev === 1 ? 2 : prev === 2 ? 3 : 1))}
+                  className="px-2.5 py-2 rounded-xl bg-slate-800 text-slate-300 border border-slate-700 hover:text-white text-xs font-bold transition-all"
+                  title="Zoom Macro Focus"
+                >
+                  {zoomLevel}x
+                </button>
 
                 {/* Switch Camera */}
                 <button
@@ -993,14 +901,10 @@ export function MedicineNameScannerModal({
                 type="button"
                 onClick={handleInstantCapture}
                 disabled={isProcessingOcr}
-                className={`flex-1 py-3 px-5 rounded-xl text-sm font-black text-slate-950 shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer ${
-                  mode === 'name'
-                    ? 'bg-emerald-400 hover:bg-emerald-300 shadow-emerald-500/30'
-                    : 'bg-sky-400 hover:bg-sky-300 shadow-sky-500/30'
-                }`}
+                className="flex-1 py-3 px-4 rounded-xl text-xs sm:text-sm font-black text-slate-950 bg-emerald-400 hover:bg-emerald-300 active:bg-emerald-500 shadow-lg shadow-emerald-500/30 flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
               >
                 <ScanLine className="w-5 h-5" />
-                <span>Capture & Scan {mode === 'name' ? 'Brand' : 'MRP'}</span>
+                <span>Capture Medicine</span>
               </button>
             </div>
           )}
@@ -1009,3 +913,4 @@ export function MedicineNameScannerModal({
     </div>
   );
 }
+

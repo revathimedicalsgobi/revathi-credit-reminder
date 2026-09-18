@@ -27,7 +27,7 @@ import { isValidWhatsAppNumber, normalizeWhatsAppNumber } from '@/lib/validation
 import { maskWhatsAppNumber } from '@/lib/utils';
 import { PurchaseSummaryCard } from '@/components/PurchaseSummaryCard';
 import { ProcessPurchaseModal } from '@/components/ProcessPurchaseModal';
-import { MedicineNameScannerModal } from '@/components/MedicineNameScannerModal';
+import { MedicineNameScannerModal, ScannerMode } from '@/components/MedicineNameScannerModal';
 
 interface ItemRow {
   id: string;
@@ -82,43 +82,66 @@ function NewPurchaseContent() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Scanner Modal state (supports Name and MRP modes)
-  const [scannerModal, setScannerModal] = useState<{ isOpen: boolean; itemIndex: number; mode: 'name' | 'mrp' }>({
+  // Scanner Modal state (supports Dual 2-in-1 Name & MRP, Name-only, and MRP-only modes)
+  const [scannerModal, setScannerModal] = useState<{ isOpen: boolean; itemIndex: number; mode: ScannerMode }>({
     isOpen: false,
     itemIndex: 0,
-    mode: 'name',
+    mode: 'all',
   });
 
-  const handleOpenScanner = (index: number, mode: 'name' | 'mrp' = 'name') => {
+  const handleOpenScanner = (index: number, mode: ScannerMode = 'all') => {
     setScannerModal({ isOpen: true, itemIndex: index, mode });
   };
 
-  const handleScannedValue = (scannedValue: string, scannedMode: 'name' | 'mrp') => {
+  const handleScannedValue = (scannedValue: string, scannedMode: ScannerMode) => {
     const targetIndex = scannerModal.itemIndex;
     if (targetIndex >= 0 && targetIndex < items.length) {
       const targetId = items[targetIndex].id;
 
       if (scannedMode === 'name') {
         handleItemChange(targetId, 'itemName', scannedValue);
-        // Auto-move cursor / focus to Quantity input box of this item row
-        setTimeout(() => {
-          const qtyInput = document.getElementById(`qty-input-${targetIndex}`) as HTMLInputElement | null;
-          if (qtyInput) {
-            qtyInput.focus();
-            qtyInput.select();
-          }
-        }, 150);
       } else if (scannedMode === 'mrp') {
         handleItemChange(targetId, 'mrp', scannedValue);
-        // Auto-move cursor / focus to Quantity input box
-        setTimeout(() => {
-          const qtyInput = document.getElementById(`qty-input-${targetIndex}`) as HTMLInputElement | null;
-          if (qtyInput) {
-            qtyInput.focus();
-            qtyInput.select();
-          }
-        }, 150);
       }
+
+      // Auto-move cursor / focus to Quantity input box of this item row
+      setTimeout(() => {
+        const qtyInput = document.getElementById(`qty-input-${targetIndex}`) as HTMLInputElement | null;
+        if (qtyInput) {
+          qtyInput.focus();
+          qtyInput.select();
+        }
+      }, 150);
+    }
+    setScannerModal((prev) => ({ ...prev, isOpen: false }));
+  };
+
+  const handleSelectBothValues = (brandName: string, mrp: string) => {
+    const targetIndex = scannerModal.itemIndex;
+    if (targetIndex >= 0 && targetIndex < items.length) {
+      const targetId = items[targetIndex].id;
+
+      setItems((prevItems) =>
+        prevItems.map((item) => {
+          if (item.id === targetId) {
+            return {
+              ...item,
+              itemName: brandName || item.itemName,
+              mrp: mrp || item.mrp,
+            };
+          }
+          return item;
+        })
+      );
+
+      // Auto-move cursor / focus to Quantity input box of this item row
+      setTimeout(() => {
+        const qtyInput = document.getElementById(`qty-input-${targetIndex}`) as HTMLInputElement | null;
+        if (qtyInput) {
+          qtyInput.focus();
+          qtyInput.select();
+        }
+      }, 150);
     }
     setScannerModal((prev) => ({ ...prev, isOpen: false }));
   };
@@ -924,6 +947,7 @@ function NewPurchaseContent() {
         isOpen={scannerModal.isOpen}
         onClose={() => setScannerModal((prev) => ({ ...prev, isOpen: false }))}
         onSelectScannedValue={handleScannedValue}
+        onSelectBothValues={handleSelectBothValues}
         itemIndex={scannerModal.itemIndex}
         initialMode={scannerModal.mode}
       />
