@@ -82,32 +82,45 @@ function NewPurchaseContent() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Scanner Modal state
-  const [scannerModal, setScannerModal] = useState<{ isOpen: boolean; itemIndex: number }>({
+  // Scanner Modal state (supports Name and MRP modes)
+  const [scannerModal, setScannerModal] = useState<{ isOpen: boolean; itemIndex: number; mode: 'name' | 'mrp' }>({
     isOpen: false,
     itemIndex: 0,
+    mode: 'name',
   });
 
-  const handleOpenScanner = (index: number) => {
-    setScannerModal({ isOpen: true, itemIndex: index });
+  const handleOpenScanner = (index: number, mode: 'name' | 'mrp' = 'name') => {
+    setScannerModal({ isOpen: true, itemIndex: index, mode });
   };
 
-  const handleMedicineNameScanned = (scannedName: string) => {
+  const handleScannedValue = (scannedValue: string, scannedMode: 'name' | 'mrp') => {
     const targetIndex = scannerModal.itemIndex;
     if (targetIndex >= 0 && targetIndex < items.length) {
       const targetId = items[targetIndex].id;
-      handleItemChange(targetId, 'itemName', scannedName);
 
-      // Auto-move cursor / focus to Quantity input box of this item row
-      setTimeout(() => {
-        const qtyInput = document.getElementById(`qty-input-${targetIndex}`) as HTMLInputElement | null;
-        if (qtyInput) {
-          qtyInput.focus();
-          qtyInput.select();
-        }
-      }, 150);
+      if (scannedMode === 'name') {
+        handleItemChange(targetId, 'itemName', scannedValue);
+        // Auto-move cursor / focus to Quantity input box of this item row
+        setTimeout(() => {
+          const qtyInput = document.getElementById(`qty-input-${targetIndex}`) as HTMLInputElement | null;
+          if (qtyInput) {
+            qtyInput.focus();
+            qtyInput.select();
+          }
+        }, 150);
+      } else if (scannedMode === 'mrp') {
+        handleItemChange(targetId, 'mrp', scannedValue);
+        // Auto-move cursor / focus to Quantity input box
+        setTimeout(() => {
+          const qtyInput = document.getElementById(`qty-input-${targetIndex}`) as HTMLInputElement | null;
+          if (qtyInput) {
+            qtyInput.focus();
+            qtyInput.select();
+          }
+        }, 150);
+      }
     }
-    setScannerModal({ isOpen: false, itemIndex: 0 });
+    setScannerModal((prev) => ({ ...prev, isOpen: false }));
   };
 
   // Close dropdown on outside click
@@ -699,12 +712,12 @@ function NewPurchaseContent() {
                             </label>
                             <button
                               type="button"
-                              onClick={() => handleOpenScanner(index)}
+                              onClick={() => handleOpenScanner(index, 'name')}
                               className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold text-emerald-800 bg-emerald-100/90 hover:bg-emerald-200 active:bg-emerald-300 border border-emerald-300 rounded-md shadow-2xs transition-all cursor-pointer"
-                              title="Scan medicine / tablet name with camera"
+                              title="Auto-scan tablet/medicine name with camera"
                             >
                               <Camera className="w-3 h-3 text-emerald-700" />
-                              <span>Scan Tablet</span>
+                              <span>Scan Name</span>
                             </button>
                           </div>
                           <input
@@ -717,7 +730,7 @@ function NewPurchaseContent() {
                           />
                         </div>
 
-                        {/* Quantity */}
+                        {/* Quantity (Manual) */}
                         <div className="col-span-4 sm:col-span-2">
                           <label className="block text-[11px] font-semibold text-slate-600 mb-1">
                             Qty
@@ -736,9 +749,20 @@ function NewPurchaseContent() {
 
                         {/* MRP */}
                         <div className="col-span-4 sm:col-span-3">
-                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                            MRP (₹)
-                          </label>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="block text-[11px] font-semibold text-slate-600">
+                              MRP (₹)
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenScanner(index, 'mrp')}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold text-sky-800 bg-sky-100/90 hover:bg-sky-200 active:bg-sky-300 border border-sky-300 rounded-md shadow-2xs transition-all cursor-pointer"
+                              title="Auto-scan MRP price from tablet strip"
+                            >
+                              <ScanLine className="w-3 h-3 text-sky-700" />
+                              <span>Scan MRP</span>
+                            </button>
+                          </div>
                           <input
                             type="number"
                             min="0"
@@ -895,12 +919,13 @@ function NewPurchaseContent() {
         errorMessage={formError}
       />
 
-      {/* Medicine / Tablet Name Camera Scanner Modal */}
+      {/* Medicine / Tablet Name & MRP Camera Scanner Modal */}
       <MedicineNameScannerModal
         isOpen={scannerModal.isOpen}
         onClose={() => setScannerModal((prev) => ({ ...prev, isOpen: false }))}
-        onSelectMedicineName={handleMedicineNameScanned}
+        onSelectScannedValue={handleScannedValue}
         itemIndex={scannerModal.itemIndex}
+        initialMode={scannerModal.mode}
       />
     </div>
   );
