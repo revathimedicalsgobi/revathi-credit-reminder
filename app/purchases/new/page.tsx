@@ -18,12 +18,16 @@ import {
   Check,
   X,
   Phone,
+  Camera,
+  Scan,
+  ScanLine,
 } from 'lucide-react';
 import { calculatePurchaseSummary, formatINR } from '@/lib/calculations';
 import { isValidWhatsAppNumber, normalizeWhatsAppNumber } from '@/lib/validations';
 import { maskWhatsAppNumber } from '@/lib/utils';
 import { PurchaseSummaryCard } from '@/components/PurchaseSummaryCard';
 import { ProcessPurchaseModal } from '@/components/ProcessPurchaseModal';
+import { MedicineNameScannerModal } from '@/components/MedicineNameScannerModal';
 
 interface ItemRow {
   id: string;
@@ -77,6 +81,34 @@ function NewPurchaseContent() {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  // Scanner Modal state
+  const [scannerModal, setScannerModal] = useState<{ isOpen: boolean; itemIndex: number }>({
+    isOpen: false,
+    itemIndex: 0,
+  });
+
+  const handleOpenScanner = (index: number) => {
+    setScannerModal({ isOpen: true, itemIndex: index });
+  };
+
+  const handleMedicineNameScanned = (scannedName: string) => {
+    const targetIndex = scannerModal.itemIndex;
+    if (targetIndex >= 0 && targetIndex < items.length) {
+      const targetId = items[targetIndex].id;
+      handleItemChange(targetId, 'itemName', scannedName);
+
+      // Auto-move cursor / focus to Quantity input box of this item row
+      setTimeout(() => {
+        const qtyInput = document.getElementById(`qty-input-${targetIndex}`) as HTMLInputElement | null;
+        if (qtyInput) {
+          qtyInput.focus();
+          qtyInput.select();
+        }
+      }, 150);
+    }
+    setScannerModal({ isOpen: false, itemIndex: 0 });
+  };
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -661,9 +693,20 @@ function NewPurchaseContent() {
                       <div className="grid grid-cols-12 gap-3 items-center">
                         {/* Item Name */}
                         <div className="col-span-12 sm:col-span-4">
-                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                            Item Name #{index + 1}
-                          </label>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="block text-[11px] font-semibold text-slate-600">
+                              Item Name #{index + 1}
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenScanner(index)}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold text-emerald-800 bg-emerald-100/90 hover:bg-emerald-200 active:bg-emerald-300 border border-emerald-300 rounded-md shadow-2xs transition-all cursor-pointer"
+                              title="Scan medicine / tablet name with camera"
+                            >
+                              <Camera className="w-3 h-3 text-emerald-700" />
+                              <span>Scan Tablet</span>
+                            </button>
+                          </div>
                           <input
                             type="text"
                             required
@@ -680,6 +723,7 @@ function NewPurchaseContent() {
                             Qty
                           </label>
                           <input
+                            id={`qty-input-${index}`}
                             type="number"
                             min="1"
                             step="1"
@@ -849,6 +893,14 @@ function NewPurchaseContent() {
         sendWhatsApp={sendWhatsApp}
         isProcessing={isProcessing}
         errorMessage={formError}
+      />
+
+      {/* Medicine / Tablet Name Camera Scanner Modal */}
+      <MedicineNameScannerModal
+        isOpen={scannerModal.isOpen}
+        onClose={() => setScannerModal((prev) => ({ ...prev, isOpen: false }))}
+        onSelectMedicineName={handleMedicineNameScanned}
+        itemIndex={scannerModal.itemIndex}
       />
     </div>
   );
