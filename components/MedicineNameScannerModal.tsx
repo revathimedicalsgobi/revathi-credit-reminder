@@ -358,30 +358,25 @@ export function MedicineNameScannerModal({
   const isOcrBusyRef = useRef(false);
   const isCapturedRef = useRef(false);
 
-  // Temporal multi-frame confirmation buffer
-  const matchHistoryRef = useRef<{ value: string; count: number }>({ value: '', count: 0 });
-
   const [mode, setMode] = useState<ScannerMode>(initialMode);
   const [cameraError, setCameraError] = useState<string | null>(null);
-  const [isWorkerReady, setIsWorkerReady] = useState(false);
   const [hasTorch, setHasTorch] = useState(false);
   const [isTorchOn, setIsTorchOn] = useState(false);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
 
-  // Live Auto-Detection State
-  const [liveDetectedText, setLiveDetectedText] = useState<string>('');
+  const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [isProcessingOcr, setIsProcessingOcr] = useState(false);
+  const [detectedValue, setDetectedValue] = useState<string>('');
   const [detectedCandidates, setDetectedCandidates] = useState<string[]>([]);
-  const [autoCaptureSuccess, setAutoCaptureSuccess] = useState<string | null>(null);
 
-  // Sync mode with initialMode when modal opens
+  // Sync mode when modal opens or initialMode changes
   useEffect(() => {
     if (isOpen) {
       setMode(initialMode);
-      setLiveDetectedText('');
+      setCapturedImage(null);
+      setDetectedValue('');
       setDetectedCandidates([]);
-      setAutoCaptureSuccess(null);
-      isCapturedRef.current = false;
-      matchHistoryRef.current = { value: '', count: 0 };
+      setIsProcessingOcr(false);
     }
   }, [isOpen, initialMode]);
 
@@ -458,12 +453,9 @@ export function MedicineNameScannerModal({
           });
           if (isMounted) {
             workerRef.current = worker;
-            setIsWorkerReady(true);
           } else {
             await worker.terminate();
           }
-        } else {
-          setIsWorkerReady(true);
         }
       } catch (err) {
         console.warn('Tesseract worker init error:', err);
@@ -482,22 +474,16 @@ export function MedicineNameScannerModal({
   // Main Camera Lifecycle
   useEffect(() => {
     if (isOpen) {
-      isCapturedRef.current = false;
+      setCapturedImage(null);
+      setDetectedValue('');
+      setDetectedCandidates([]);
       startCamera(facingMode);
     } else {
       stopCameraTracks();
-      if (scanIntervalRef.current) {
-        clearInterval(scanIntervalRef.current);
-        scanIntervalRef.current = null;
-      }
     }
 
     return () => {
       stopCameraTracks();
-      if (scanIntervalRef.current) {
-        clearInterval(scanIntervalRef.current);
-        scanIntervalRef.current = null;
-      }
     };
   }, [isOpen, facingMode, startCamera]);
 
@@ -511,58 +497,60 @@ export function MedicineNameScannerModal({
     };
   }, []);
 
-  // Frame processing using human-like brand & MRP analysis
-  const scanCurrentFrame = useCallback(async () => {
-    if (!videoRef.current || !workerRef.current || isOcrBusyRef.current || isCapturedRef.current) {
-      return;
-    }
+  // Perform instant High-Resolution Crop Capture and Fast OCR
+  const handleInstantCapture = async () => {
+    if (!videoRef.current) return;
 
     const video = videoRef.current;
     if (video.readyState < 2 || video.videoWidth === 0) return;
 
-    isOcrBusyRef.current = true;
+    const canvas = canvasRef.current || document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+
+    const videoWidth = video.videoWidth;
+    const videoHeight = video.videoHeight;
+
+    // Crop center rectangular target area (82% width, 32% height)
+    const cropWidth = Math.round(videoWidth * 0.82);
+    const cropHeight = Math.round(videoHeight * 0.32);
+    const cropX = Math.round((videoWidth - cropWidth) / 2);
+    const cropY = Math.round((videoHeight - cropHeight) / 2);
+
+    canvas.width = cropWidth;
+    canvas.height = cropHeight;
+
+    ctx.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+
+    // Freeze captured crop image for instant tactile feedback
+    const frozenDataUrl = canvas.toDataURL('image/jpeg', 0.95);
+    setCapturedImage(frozenDataUrl);
+    setIsProcessingOcr(true);
+
+    // Apply high-contrast grayscale preprocessing for foil reflections
+    try {
+      const imgData = ctx.getImageData(0, 0, cropWidth, cropHeight);
+      const d = imgData.data;
+      for (let i = 0; i < d.length; i += 4) {
+        const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        const contrast = 1.35;
+        const enhanced = Math.min(255, Math.max(0, (lum - 128) * contrast + 128));
+        d[i] = enhanced;
+        d[i + 1] = enhanced;
+        d[i + 2] = enhanced;
+      }
+      ctx.putImageData(imgData, 0, 0);
+    } catch {
+      // ignore
+    }
 
     try {
-      const canvas = canvasRef.current || document.createElement('canvas');
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      if (!ctx) {
-        isOcrBusyRef.current = false;
-        return;
-      }
-
-      const videoWidth = video.videoWidth;
-      const videoHeight = video.videoHeight;
-
-      // Crop rectangular center target
-      const cropWidth = Math.round(videoWidth * 0.82);
-      const cropHeight = Math.round(videoHeight * 0.32);
-      const cropX = Math.round((videoWidth - cropWidth) / 2);
-      const cropY = Math.round((videoHeight - cropHeight) / 2);
-
-      canvas.width = cropWidth;
-      canvas.height = cropHeight;
-
-      ctx.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
-
-      // Advanced Multi-Stage Image Preprocessing for Blister Foils & Small Fonts
-      try {
-        const imgData = ctx.getImageData(0, 0, cropWidth, cropHeight);
-        const d = imgData.data;
-
-        // Pass 1: High Contrast Grayscale Conversion
-        for (let i = 0; i < d.length; i += 4) {
-          const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-          // Boost contrast to eliminate metallic foil glare
-          const contrast = 1.35;
-          const enhanced = Math.min(255, Math.max(0, (lum - 128) * contrast + 128));
-          d[i] = enhanced;
-          d[i + 1] = enhanced;
-          d[i + 2] = enhanced;
-        }
-
-        ctx.putImageData(imgData, 0, 0);
-      } catch {
-        // Continue if canvas getImageData throws
+      // Ensure worker is ready
+      if (!workerRef.current) {
+        workerRef.current = await createWorker('eng', 1);
+        await workerRef.current.setParameters({
+          tessedit_pageseg_mode: PSM.SPARSE_TEXT,
+        });
       }
 
       const result = await workerRef.current.recognize(canvas);
@@ -572,83 +560,51 @@ export function MedicineNameScannerModal({
         lines: result.data.lines,
       };
 
-      if (isCapturedRef.current) {
-        isOcrBusyRef.current = false;
-        return;
-      }
-
       if (mode === 'name') {
-        const brandAnalysis = analyzeAndExtractBrandName(ocrData);
-        if (brandAnalysis && brandAnalysis.brandName) {
-          const detectedBrand = brandAnalysis.brandName;
-          setLiveDetectedText(detectedBrand);
-          setDetectedCandidates(brandAnalysis.candidates);
-
-          // Multi-frame stability check
-          if (matchHistoryRef.current.value === detectedBrand) {
-            matchHistoryRef.current.count += 1;
-          } else {
-            matchHistoryRef.current = { value: detectedBrand, count: 1 };
-          }
-
-          // Auto-capture on 2 consecutive matching frames or very high prominence score
-          if (matchHistoryRef.current.count >= 2 || brandAnalysis.score >= 80) {
-            isCapturedRef.current = true;
-            setAutoCaptureSuccess(detectedBrand);
-
-            setTimeout(() => {
-              onSelectScannedValue(detectedBrand, 'name');
-              onClose();
-            }, 450);
-          }
+        const brand = analyzeAndExtractBrandName(ocrData);
+        if (brand && brand.brandName) {
+          setDetectedValue(brand.brandName);
+          setDetectedCandidates(brand.candidates);
+        } else {
+          // Fallback: clean raw text
+          const fallback = ocrData.text.replace(/[^a-zA-Z0-9\s-]/g, '').trim().split('\n')[0] || '';
+          setDetectedValue(fallback);
         }
       } else if (mode === 'mrp') {
-        const mrpAnalysis = analyzeAndExtractMRP(ocrData);
-        if (mrpAnalysis && mrpAnalysis.price) {
-          const detectedPrice = mrpAnalysis.price;
-          setLiveDetectedText(`₹${detectedPrice}`);
-
-          // Multi-frame stability check
-          if (matchHistoryRef.current.value === detectedPrice) {
-            matchHistoryRef.current.count += 1;
-          } else {
-            matchHistoryRef.current = { value: detectedPrice, count: 1 };
-          }
-
-          // Auto-capture on 2 consecutive matching frames
-          if (matchHistoryRef.current.count >= 2) {
-            isCapturedRef.current = true;
-            setAutoCaptureSuccess(`₹${detectedPrice}`);
-
-            setTimeout(() => {
-              onSelectScannedValue(detectedPrice, 'mrp');
-              onClose();
-            }, 450);
-          }
+        const mrp = analyzeAndExtractMRP(ocrData);
+        if (mrp && mrp.price) {
+          setDetectedValue(mrp.price);
+        } else {
+          // Fallback: search for numbers
+          const numMatch = ocrData.text.match(/\b([0-9]+(?:\.[0-9]{1,2})?)\b/);
+          setDetectedValue(numMatch ? numMatch[1] : '');
         }
       }
     } catch (err) {
-      console.warn('Frame scan OCR error:', err);
+      console.warn('OCR capture error:', err);
+      setCameraError('Text recognition failed. Please try again with clear focus.');
     } finally {
-      isOcrBusyRef.current = false;
+      setIsProcessingOcr(false);
     }
-  }, [mode, onSelectScannedValue, onClose]);
+  };
 
-  // Continuous Auto-Scanning Loop (runs every 450ms)
-  useEffect(() => {
-    if (isOpen && isWorkerReady) {
-      scanIntervalRef.current = setInterval(() => {
-        scanCurrentFrame();
-      }, 450);
-    }
+  // Reset to live camera feed
+  const handleRescan = () => {
+    setCapturedImage(null);
+    setDetectedValue('');
+    setDetectedCandidates([]);
+    setIsProcessingOcr(false);
+    startCamera(facingMode);
+  };
 
-    return () => {
-      if (scanIntervalRef.current) {
-        clearInterval(scanIntervalRef.current);
-        scanIntervalRef.current = null;
-      }
-    };
-  }, [isOpen, isWorkerReady, scanCurrentFrame]);
+  // Confirm value and send back to form
+  const handleConfirmValue = (valToUse?: string) => {
+    const finalVal = (valToUse !== undefined ? valToUse : detectedValue).trim();
+    if (!finalVal) return;
+
+    onSelectScannedValue(finalVal, mode);
+    onClose();
+  };
 
   // Flashlight / Torch Toggle
   const toggleTorch = async () => {
@@ -670,51 +626,55 @@ export function MedicineNameScannerModal({
     setFacingMode(nextFacing);
   };
 
-  // Manual Candidate Click (Instant Pick)
-  const handleSelectCandidate = (val: string) => {
-    isCapturedRef.current = true;
-    setAutoCaptureSuccess(val);
-    setTimeout(() => {
-      onSelectScannedValue(val, mode);
-      onClose();
-    }, 200);
-  };
-
   // File Upload fallback
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !workerRef.current) return;
+    if (!file) return;
 
     const reader = new FileReader();
     reader.onload = async () => {
       const imgUrl = reader.result as string;
+      setCapturedImage(imgUrl);
+      setIsProcessingOcr(true);
+
       const img = new Image();
       img.onload = async () => {
         const canvas = canvasRef.current || document.createElement('canvas');
         canvas.width = img.width;
         canvas.height = img.height;
         const ctx = canvas.getContext('2d');
-        if (ctx && workerRef.current) {
+        if (ctx) {
           ctx.drawImage(img, 0, 0);
+
+          if (!workerRef.current) {
+            workerRef.current = await createWorker('eng', 1);
+          }
+
           const result = await workerRef.current.recognize(canvas);
           const ocrData: OcrResultData = {
             text: result.data.text || '',
             // @ts-expect-error Tesseract lines
             lines: result.data.lines,
           };
+
           if (mode === 'name') {
             const brand = analyzeAndExtractBrandName(ocrData);
             if (brand) {
-              onSelectScannedValue(brand.brandName, 'name');
-              onClose();
+              setDetectedValue(brand.brandName);
+              setDetectedCandidates(brand.candidates);
+            } else {
+              setDetectedValue(ocrData.text.split('\n')[0] || '');
             }
           } else {
             const mrp = analyzeAndExtractMRP(ocrData);
             if (mrp) {
-              onSelectScannedValue(mrp.price, 'mrp');
-              onClose();
+              setDetectedValue(mrp.price);
+            } else {
+              const numMatch = ocrData.text.match(/\b([0-9]+(?:\.[0-9]{1,2})?)\b/);
+              setDetectedValue(numMatch ? numMatch[1] : '');
             }
           }
+          setIsProcessingOcr(false);
         }
       };
       img.src = imgUrl;
@@ -746,14 +706,14 @@ export function MedicineNameScannerModal({
             <div>
               <div className="flex items-center gap-1.5">
                 <h3 className="text-sm sm:text-base font-bold text-white">
-                  {mode === 'name' ? 'Auto-Scan Tablet Name' : 'Auto-Scan MRP / Price'}
+                  {mode === 'name' ? 'Scan Tablet / Medicine Name' : 'Scan MRP / Price'}
                 </h3>
                 <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full font-mono">
                   Item #{itemIndex + 1}
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">
-                Hold rectangle over {mode === 'name' ? 'medicine name' : 'MRP / Price'} — Auto-captures automatically!
+                Focus box on {mode === 'name' ? 'tablet name' : 'MRP price'} & press Capture
               </p>
             </div>
           </div>
@@ -768,140 +728,122 @@ export function MedicineNameScannerModal({
         </div>
 
         {/* Mode Switcher Tabs */}
-        <div className="flex bg-slate-950 p-1.5 border-b border-slate-800 gap-1.5">
-          <button
-            type="button"
-            onClick={() => {
-              setMode('name');
-              setLiveDetectedText('');
-              setAutoCaptureSuccess(null);
-              isCapturedRef.current = false;
-            }}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
-              mode === 'name'
-                ? 'bg-emerald-600 text-white shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <Scan className="w-3.5 h-3.5" />
-            <span>Scan Tablet Name</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setMode('mrp');
-              setLiveDetectedText('');
-              setAutoCaptureSuccess(null);
-              isCapturedRef.current = false;
-            }}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
-              mode === 'mrp'
-                ? 'bg-sky-600 text-white shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <IndianRupee className="w-3.5 h-3.5" />
-            <span>Scan MRP Price</span>
-          </button>
-        </div>
-
-        {/* Camera Viewfinder Area */}
-        <div className="relative flex-1 bg-black min-h-[310px] sm:min-h-[350px] flex items-center justify-center overflow-hidden">
-          {/* Live Video Feed */}
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="w-full h-full object-cover min-h-[310px]"
-          />
-
-          {/* Viewfinder Target Mask with Center Rectangle */}
-          <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
-            {/* Top mask */}
-            <div className="w-full flex-1 bg-black/55 backdrop-blur-[1px]" />
-
-            {/* Center Scan Rectangle */}
-            <div
-              className={`relative w-[85%] sm:w-[80%] h-28 sm:h-32 rounded-2xl border-2 transition-all flex items-center justify-center overflow-hidden ${
-                autoCaptureSuccess
-                  ? 'border-emerald-400 bg-emerald-500/25 shadow-[0_0_30px_rgba(52,211,153,0.8)] scale-105'
-                  : mode === 'name'
-                  ? 'border-emerald-400 shadow-[0_0_20px_rgba(52,211,153,0.4)]'
-                  : 'border-sky-400 shadow-[0_0_20px_rgba(56,189,248,0.4)]'
+        {!capturedImage && (
+          <div className="flex bg-slate-950 p-1.5 border-b border-slate-800 gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                setMode('name');
+                setDetectedValue('');
+                setDetectedCandidates([]);
+              }}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                mode === 'name'
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
               }`}
             >
-              {/* Corner Brackets */}
-              <div className="absolute top-1 left-1 w-3.5 h-3.5 border-t-2 border-l-2 border-white rounded-tl" />
-              <div className="absolute top-1 right-1 w-3.5 h-3.5 border-t-2 border-r-2 border-white rounded-tr" />
-              <div className="absolute bottom-1 left-1 w-3.5 h-3.5 border-b-2 border-l-2 border-white rounded-bl" />
-              <div className="absolute bottom-1 right-1 w-3.5 h-3.5 border-b-2 border-r-2 border-white rounded-br" />
+              <Scan className="w-3.5 h-3.5" />
+              <span>Scan Tablet Name</span>
+            </button>
 
-              {/* Animated Laser Scan Line */}
-              {!autoCaptureSuccess && (
+            <button
+              type="button"
+              onClick={() => {
+                setMode('mrp');
+                setDetectedValue('');
+                setDetectedCandidates([]);
+              }}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                mode === 'mrp'
+                  ? 'bg-sky-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+              }`}
+            >
+              <IndianRupee className="w-3.5 h-3.5" />
+              <span>Scan MRP Price</span>
+            </button>
+          </div>
+        )}
+
+        {/* Camera Viewfinder / Preview Area */}
+        <div className="relative flex-1 bg-black min-h-[300px] sm:min-h-[340px] flex items-center justify-center overflow-hidden">
+          {!capturedImage ? (
+            /* Live 60FPS Camera Feed with Rectangular Viewfinder */
+            <>
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover min-h-[300px]"
+              />
+
+              {/* Viewfinder Target Mask */}
+              <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
+                {/* Top mask */}
+                <div className="w-full flex-1 bg-black/55 backdrop-blur-[1px]" />
+
+                {/* Center Scan Rectangle */}
                 <div
-                  className={`absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent ${
-                    mode === 'name' ? 'via-emerald-400 shadow-[0_0_12px_#34d399]' : 'via-sky-400 shadow-[0_0_12px_#38bdf8]'
-                  } to-transparent animate-pulse`}
-                />
-              )}
-
-              {/* Auto Capture Notification / Center Label */}
-              {autoCaptureSuccess ? (
-                <div className="flex items-center gap-1.5 bg-emerald-900/90 text-white px-3 py-1.5 rounded-full border border-emerald-400 shadow-lg animate-bounce">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  <span className="text-xs font-black tracking-wide">
-                    Captured: {autoCaptureSuccess}
-                  </span>
-                </div>
-              ) : (
-                <span
-                  className={`text-[11px] font-bold bg-black/75 px-3 py-1 rounded-full border tracking-wide uppercase ${
+                  className={`relative w-[85%] sm:w-[80%] h-28 sm:h-32 rounded-2xl border-2 transition-all flex items-center justify-center overflow-hidden ${
                     mode === 'name'
-                      ? 'text-emerald-300 border-emerald-500/40'
-                      : 'text-sky-300 border-sky-500/40'
+                      ? 'border-emerald-400 shadow-[0_0_20px_rgba(52,211,153,0.4)]'
+                      : 'border-sky-400 shadow-[0_0_20px_rgba(56,189,248,0.4)]'
                   }`}
                 >
-                  {mode === 'name' ? 'Target Tablet Name' : 'Target MRP / Price'}
-                </span>
-              )}
-            </div>
+                  {/* Corner Brackets */}
+                  <div className="absolute top-1 left-1 w-3.5 h-3.5 border-t-2 border-l-2 border-white rounded-tl" />
+                  <div className="absolute top-1 right-1 w-3.5 h-3.5 border-t-2 border-r-2 border-white rounded-tr" />
+                  <div className="absolute bottom-1 left-1 w-3.5 h-3.5 border-b-2 border-l-2 border-white rounded-bl" />
+                  <div className="absolute bottom-1 right-1 w-3.5 h-3.5 border-b-2 border-r-2 border-white rounded-br" />
 
-            {/* Bottom mask & Live Reading Status */}
-            <div className="w-full flex-1 bg-black/55 backdrop-blur-[1px] flex flex-col items-center justify-center p-2 gap-1.5">
-              {liveDetectedText ? (
-                <div className="flex items-center gap-1.5 text-xs text-white bg-slate-800/90 px-3 py-1 rounded-full border border-slate-700 shadow-sm max-w-[90%] truncate">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 animate-spin" />
-                  <span className="text-[11px] text-slate-300">
-                    {mode === 'name' ? 'Brand Detected:' : 'MRP Detected:'}
+                  {/* Animated Laser Scan Line */}
+                  <div
+                    className={`absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent ${
+                      mode === 'name' ? 'via-emerald-400 shadow-[0_0_12px_#34d399]' : 'via-sky-400 shadow-[0_0_12px_#38bdf8]'
+                    } to-transparent animate-pulse`}
+                  />
+
+                  <span
+                    className={`text-[11px] font-bold bg-black/75 px-3 py-1 rounded-full border tracking-wide uppercase ${
+                      mode === 'name'
+                        ? 'text-emerald-300 border-emerald-500/40'
+                        : 'text-sky-300 border-sky-500/40'
+                    }`}
+                  >
+                    {mode === 'name' ? 'Target Tablet Name Here' : 'Target MRP / Price Here'}
                   </span>
-                  <span className="font-bold text-white truncate">{liveDetectedText}</span>
                 </div>
-              ) : (
-                <span className="text-xs text-slate-300 font-medium bg-slate-900/80 px-3 py-1 rounded-full border border-slate-700/80">
-                  ⚡ Auto-captures brand & MRP in real-time
-                </span>
-              )}
 
-              {/* Detected Brand Candidates quick tap chips */}
-              {mode === 'name' && detectedCandidates.length > 1 && !autoCaptureSuccess && (
-                <div className="flex flex-wrap items-center justify-center gap-1.5 max-w-[95%] pointer-events-auto">
-                  <span className="text-[10px] text-slate-300 font-medium">Tap brand:</span>
-                  {detectedCandidates.map((cand, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => handleSelectCandidate(cand)}
-                      className="px-2 py-0.5 bg-emerald-950/90 hover:bg-emerald-800 text-emerald-300 border border-emerald-500/60 rounded-lg text-[10px] font-bold tracking-wide transition-all active:scale-95 shadow-xs cursor-pointer"
-                    >
-                      {cand}
-                    </button>
-                  ))}
+                {/* Bottom mask */}
+                <div className="w-full flex-1 bg-black/55 backdrop-blur-[1px] flex items-center justify-center pb-2">
+                  <span className="text-xs text-slate-300 font-medium bg-slate-900/80 px-3 py-1 rounded-full border border-slate-700">
+                    Hold steady & tap Capture below
+                  </span>
+                </div>
+              </div>
+            </>
+          ) : (
+            /* Frozen Sharp Image Crop Preview with OCR Result */
+            <div className="relative w-full h-full flex flex-col items-center justify-center p-4 bg-slate-950 space-y-3">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={capturedImage}
+                alt="Captured tablet crop"
+                className="max-h-28 rounded-xl border-2 border-emerald-500/60 shadow-lg object-contain bg-black"
+              />
+
+              {isProcessingOcr && (
+                <div className="flex flex-col items-center gap-2 text-emerald-400">
+                  <div className="w-8 h-8 border-3 border-emerald-400/20 border-t-emerald-400 rounded-full animate-spin" />
+                  <span className="text-xs font-bold tracking-wide">
+                    Analyzing {mode === 'name' ? 'Brand Name' : 'MRP'}...
+                  </span>
                 </div>
               )}
             </div>
-          </div>
+          )}
 
           {/* Hidden Canvas & File Input */}
           <canvas ref={canvasRef} className="hidden" />
@@ -923,60 +865,145 @@ export function MedicineNameScannerModal({
           )}
         </div>
 
-        {/* Action Controls & Utilities */}
-        <div className="p-3 bg-slate-900 border-t border-slate-800 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            {/* Torch toggle */}
-            {hasTorch && (
+        {/* Bottom Result Card / Action Toolbar */}
+        <div className="p-3.5 bg-slate-900 border-t border-slate-800">
+          {capturedImage && !isProcessingOcr ? (
+            /* Detected Result Confirmation Card */
+            <div className="space-y-3 animate-in fade-in slide-in-from-bottom-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Detected {mode === 'name' ? 'Brand Name' : 'MRP Price'}</span>
+                </span>
+                <span className="text-[10px] text-slate-400">Edit if needed</span>
+              </div>
+
+              {/* Editable Result Input */}
+              <div className="relative">
+                {mode === 'mrp' && (
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sky-400 font-bold text-base">
+                    ₹
+                  </span>
+                )}
+                <input
+                  type="text"
+                  value={detectedValue}
+                  onChange={(e) => setDetectedValue(e.target.value)}
+                  placeholder={mode === 'name' ? 'e.g. Dolo 650' : 'e.g. 45.00'}
+                  className={`w-full py-2.5 rounded-xl border text-base font-black text-white bg-slate-800/90 focus:outline-none focus:ring-2 ${
+                    mode === 'name'
+                      ? 'px-3.5 border-emerald-500/50 focus:ring-emerald-400'
+                      : 'pl-8 pr-3.5 border-sky-500/50 focus:ring-sky-400'
+                  }`}
+                  autoFocus
+                />
+              </div>
+
+              {/* Candidate Chips for Brand Name */}
+              {mode === 'name' && detectedCandidates.length > 0 && (
+                <div className="space-y-1">
+                  <span className="text-[10px] text-slate-400 block">Or pick detected word:</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {detectedCandidates.map((cand, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setDetectedValue(cand)}
+                        className={`px-2.5 py-1 text-xs rounded-lg border transition-all ${
+                          detectedValue === cand
+                            ? 'bg-emerald-600 text-white border-emerald-500 font-bold'
+                            : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                        }`}
+                      >
+                        {cand}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Action Buttons: Rescan & Confirm */}
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleRescan}
+                  className="px-4 py-2.5 text-xs font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl transition-colors cursor-pointer"
+                >
+                  ↺ Rescan
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleConfirmValue()}
+                  disabled={!detectedValue.trim()}
+                  className={`flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-slate-950 font-black rounded-xl text-xs sm:text-sm shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer ${
+                    mode === 'name'
+                      ? 'bg-emerald-500 hover:bg-emerald-400'
+                      : 'bg-sky-400 hover:bg-sky-300'
+                  }`}
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Use {mode === 'name' ? 'Brand Name' : 'MRP (₹)'}</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* Live Camera Toolbar with Big Capture Button */
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                {/* Torch toggle */}
+                {hasTorch && (
+                  <button
+                    type="button"
+                    onClick={toggleTorch}
+                    className={`p-2.5 rounded-xl border transition-all ${
+                      isTorchOn
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                        : 'bg-slate-800 text-slate-300 border-slate-700 hover:text-white'
+                    }`}
+                    title="Toggle Torch / Flashlight"
+                  >
+                    {isTorchOn ? <Zap className="w-4 h-4 text-amber-400" /> : <ZapOff className="w-4 h-4" />}
+                  </button>
+                )}
+
+                {/* Switch Camera */}
+                <button
+                  type="button"
+                  onClick={toggleFacingMode}
+                  className="p-2.5 rounded-xl bg-slate-800 text-slate-300 border border-slate-700 hover:text-white text-xs font-semibold transition-all"
+                  title="Switch Camera"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </button>
+
+                {/* Gallery Fallback */}
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="p-2.5 rounded-xl bg-slate-800 text-slate-300 border border-slate-700 hover:text-white text-xs font-semibold transition-all"
+                  title="Upload Photo from Gallery"
+                >
+                  <ImageIcon className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Big High-Speed Capture Button */}
               <button
                 type="button"
-                onClick={toggleTorch}
-                className={`p-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-all ${
-                  isTorchOn
-                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                    : 'bg-slate-800 text-slate-300 border-slate-700 hover:text-white'
+                onClick={handleInstantCapture}
+                disabled={isProcessingOcr}
+                className={`flex-1 py-3 px-5 rounded-xl text-sm font-black text-slate-950 shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer ${
+                  mode === 'name'
+                    ? 'bg-emerald-400 hover:bg-emerald-300 shadow-emerald-500/30'
+                    : 'bg-sky-400 hover:bg-sky-300 shadow-sky-500/30'
                 }`}
-                title="Toggle Torch / Flashlight"
               >
-                {isTorchOn ? <Zap className="w-4 h-4 text-amber-400" /> : <ZapOff className="w-4 h-4" />}
-                <span className="hidden sm:inline">Torch</span>
+                <ScanLine className="w-5 h-5" />
+                <span>Capture & Scan {mode === 'name' ? 'Brand' : 'MRP'}</span>
               </button>
-            )}
-
-            {/* Switch Camera */}
-            <button
-              type="button"
-              onClick={toggleFacingMode}
-              className="p-2 rounded-xl bg-slate-800 text-slate-300 border border-slate-700 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-all"
-              title="Switch Camera"
-            >
-              <RefreshCw className="w-4 h-4" />
-              <span className="hidden sm:inline">Flip</span>
-            </button>
-
-            {/* Gallery Fallback */}
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="p-2 rounded-xl bg-slate-800 text-slate-300 border border-slate-700 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-all"
-              title="Upload Photo from Gallery"
-            >
-              <ImageIcon className="w-4 h-4" />
-              <span className="hidden sm:inline">Upload</span>
-            </button>
-          </div>
-
-          {/* Quick Manual Scan Trigger */}
-          <button
-            type="button"
-            onClick={scanCurrentFrame}
-            className={`px-4 py-2 rounded-xl text-xs font-bold text-white shadow-md flex items-center gap-1.5 transition-all active:scale-95 ${
-              mode === 'name' ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-sky-600 hover:bg-sky-500'
-            }`}
-          >
-            <ScanLine className="w-4 h-4" />
-            <span>Scan Now</span>
-          </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
