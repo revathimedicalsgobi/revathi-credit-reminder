@@ -66,7 +66,7 @@ export function buildWhatsAppSummaryText(data: WhatsAppShareData): string {
   const customerGreeting = formatCustomerSalutation(data.customerName);
 
   const itemsList = data.items && data.items.length > 0
-    ? data.items.map((i) => `• ${i.itemName} × ${i.quantity} = ${formatINR(i.netAmount)}`).join('\n')
+    ? data.items.map((i) => `  🌸 ${i.itemName} × ${i.quantity} = ${formatINR(i.netAmount)}`).join('\n')
     : '';
 
   const previousBal = Number(data.previousBalance || 0);
@@ -77,70 +77,72 @@ export function buildWhatsAppSummaryText(data: WhatsAppShareData): string {
     partialLine = `\n💵 *Paid Amount:* ${formatINR(data.paidAmount)}\n⏳ *Remaining Balance:* *${formatINR(data.balanceDue)}*`;
   }
 
-  // Highlighted Big Savings Banner
+  // Highlighted Big Savings Banner with Floral Accents
   let savingsSection = '';
   if (data.totalDiscount && data.totalDiscount > 0) {
-    savingsSection = `\n\n🎉 *━━━━━━━━━━━━━━━━━━━━━━━*\n🎁 *YOUR TOTAL SAVINGS: ${formatINR(data.totalDiscount)}* 💰\n🎉 *━━━━━━━━━━━━━━━━━━━━━━━*`;
+    savingsSection = `\n\n🎉 ❀ ══════════════════ ❀ 🎉\n🎁 *YOUR TOTAL SAVINGS: ${formatINR(data.totalDiscount)}* 💰\n🎉 ❀ ══════════════════ ❀ 🎉`;
   }
 
   if (previousBal > 0) {
     let dateWiseList = '';
     if (data.dateWisePendingBills && data.dateWisePendingBills.length > 0) {
       dateWiseList = data.dateWisePendingBills
-        .map((b, idx) => `  ${idx + 1}. ${formatShortDate(b.date)}: ${formatINR(b.amount)}`)
+        .map((b, idx) => `    🌿 ${idx + 1}. ${formatShortDate(b.date)}: *${formatINR(b.amount)}*`)
         .join('\n');
     }
 
-    return `━━━━━━━━━━━━━━━━━━━━━━━
+    return `🌸══════════════════════🌸
 🏥 *${pharmacy.toUpperCase()}*
 📋 *CREDIT BILL & CUMULATIVE STATEMENT*
-━━━━━━━━━━━━━━━━━━━━━━━
+🌸══════════════════════🌸
 
-Hello *${customerGreeting}*,
+Hello *${customerGreeting}* 🌸,
 
-Thank you for your visit. Here is your bill and cumulative account statement:
+Thank you for your visit! Here is your bill & cumulative account statement: 🌿
 
 📅 *Bill Date:* ${dateStr}
 
 🛒 *Today's Items:*
 ${itemsList}
 
-───────────────────────
+🌸 • ────────────────── • 🌸
 💵 *Today's Bill Amount:* *${billAmountStr}*${partialLine}
-───────────────────────${savingsSection}
+🌸 • ────────────────── • 🌸${savingsSection}
 
 📌 *Previous Unpaid Credit (Date-Wise):*
 ${dateWiseList ? dateWiseList + '\n' : ''}• *Previous Outstanding:* ${formatINR(previousBal)}
 • *Today's New Purchase:* ${billAmountStr}
 
-━━━━━━━━━━━━━━━━━━━━━━━
+🌸══════════════════════🌸
 🔴 *TOTAL CUMULATIVE BALANCE DUE:* *${formatINR(cumulativeTotal)}*
-━━━━━━━━━━━━━━━━━━━━━━━${upiLine}
+🌸══════════════════════🌸${upiLine}
 
 Please settle the cumulative amount at your convenience.
-Thank you for choosing *${pharmacy}*! 🙏`;
+🙏 *Thank you for choosing ${pharmacy}!* 🌿
+✨ *Wishing you good health & happiness!* 🌸`;
   }
 
-  return `━━━━━━━━━━━━━━━━━━━━━━━
+  return `🌸══════════════════════🌸
 🏥 *${pharmacy.toUpperCase()}*
 📄 *PURCHASE SUMMARY BILL*
-━━━━━━━━━━━━━━━━━━━━━━━
+🌸══════════════════════🌸
 
-Hello *${customerGreeting}*,
+Hello *${customerGreeting}* 🌸,
 
-Thank you for your purchase from *${pharmacy}*.
+Thank you for your purchase from *${pharmacy}*! 🌿
 
 📅 *Date:* ${dateStr}
 
-🛒 *Items:*
+🛒 *Items Purchased:*
 ${itemsList}
 
-───────────────────────
+🌸 • ────────────────── • 🌸
 💰 *Total Bill Amount:* *${billAmountStr}*${partialLine}
 *Payment Status:* ⏳ Pending (Credit)
-───────────────────────${savingsSection}${upiLine}
+🌸 • ────────────────── • 🌸${savingsSection}${upiLine}
 
-Thank you for choosing *${pharmacy}*! 🙏`;
+🙏 *Thank you for choosing ${pharmacy}!* 🌿
+✨ *Wishing you good health & happiness!* 🌸`;
 }
 
 export interface WhatsAppReminderData {
@@ -163,7 +165,7 @@ export function buildWhatsAppReminderText(data: WhatsAppReminderData): string {
   const pendingStr = formatINR(data.amountPending);
   const dateStr = formatShortDate(data.purchaseDate);
   const daysText = data.pendingDays === 0 ? 'Today' : data.pendingDays === 1 ? '1 day' : `${data.pendingDays} days`;
-  const upiLine = data.upiId ? `\n💳 *UPI ID:* ${data.upiId}` : '';
+  const upiLine = data.upiId ? `\n💳 *UPI ID:* \`${data.upiId}\`` : '';
   const customerGreeting = formatCustomerSalutation(data.customerName);
 
   let breakdownText = `💰 *Amount Pending:* *${pendingStr}*`;
@@ -171,14 +173,22 @@ export function buildWhatsAppReminderText(data: WhatsAppReminderData): string {
     breakdownText = `📋 *Total Bill:* ${formatINR(data.totalBillAmount)}\n💵 *Already Paid:* ${formatINR(data.paidAmount)}\n⏳ *Remaining Balance Due:* *${pendingStr}*`;
   }
 
-  return `Hello *${customerGreeting}*,
+  return `🌸══════════════════════🌸
+🏥 *${pharmacy.toUpperCase()}*
+⏰ *PAYMENT REMINDER*
+🌸══════════════════════🌸
 
-This is a gentle payment reminder from *${pharmacy}* regarding your purchase on *${dateStr}* (Pending: ${daysText}).
+Hello *${customerGreeting}* 🌸,
 
-${breakdownText}${upiLine}
+This is a gentle payment reminder from *${pharmacy}* regarding your purchase on *${dateStr}* (Pending: ${daysText}). 🌿
+
+🌸 • ────────────────── • 🌸
+${breakdownText}
+🌸 • ────────────────── • 🌸${upiLine}
 
 Please complete the payment at your earliest convenience.
-Thank you for your visit! 🙏`;
+🙏 *Thank you for choosing ${pharmacy}!* 🌿
+✨ *Wishing you good health!* 🌸`;
 }
 
 export interface WhatsAppThankYouData {
@@ -203,32 +213,41 @@ export function buildWhatsAppThankYouText(data: WhatsAppThankYouData): string {
     const remainingStr = formatINR(data.remainingBalance);
     const totalStr = data.totalBillAmount ? formatINR(data.totalBillAmount) : '';
 
-    return `━━━━━━━━━━━━━━━━━━━━
+    return `🌸══════════════════════🌸
 🏥 *${pharmacy.toUpperCase()}*
 💵 *PARTIAL PAYMENT RECEIVED*
-━━━━━━━━━━━━━━━━━━━━
+🌸══════════════════════🌸
 
-Hello *${customerGreeting}*,
+Hello *${customerGreeting}* 🌸,
 
-We have received your payment of *${amountStr}* successfully.
+We have received your partial payment of *${amountStr}* successfully. 🌿
 
+🌸 • ────────────────── • 🌸
 📊 *Payment Details:*
-${totalStr ? `• *Total Bill Amount:* ${totalStr}\n` : ''}• *Amount Received:* *${amountStr}*
+${totalStr ? `• *Total Bill Amount:* ${totalStr}\n` : ''}• 💵 *Amount Received:* *${amountStr}*
 • ⏳ *Remaining Balance Due:* *${remainingStr}*
+🌸 • ────────────────── • 🌸
 
-Thank you for choosing *${pharmacy}*. Please settle the remaining balance at your convenience! 🙏`;
+Please settle the remaining balance at your convenience.
+🙏 *Thank you for choosing ${pharmacy}!* 🌿
+✨ *Wishing you good health & happiness!* 🌸`;
   }
 
-  return `━━━━━━━━━━━━━━━━━━━━
+  return `🌸══════════════════════🌸
 🏥 *${pharmacy.toUpperCase()}*
 ✅ *PAYMENT RECEIVED (SETTLED)*
-━━━━━━━━━━━━━━━━━━━━
+🌸══════════════════════🌸
 
-Hello *${customerGreeting}*,
+Hello *${customerGreeting}* 🌸,
 
-We have received your payment of *${amountStr}* successfully. Your bill is now fully settled.
+We have received your payment of *${amountStr}* successfully. Your bill is now fully settled! 🎉
 
-Thank you for choosing *${pharmacy}*. We look forward to serving you again! 🙏`;
+🌸 • ────────────────── • 🌸
+✨ *All dues have been cleared!* ✨
+🌸 • ────────────────── • 🌸
+
+🙏 *Thank you for choosing ${pharmacy}!* 🌿
+✨ *We look forward to serving you again!* 🌸`;
 }
 
 export interface WhatsAppStatementData {
@@ -265,7 +284,7 @@ export function buildWhatsAppCustomerStatementText(data: WhatsAppStatementData):
       const dStr = formatShortDate(b.date);
       const amtStr = formatINR(b.amount);
       const itemNote = b.itemsSummary ? ` (${b.itemsSummary})` : '';
-      return `  ${idx + 1}. ${dStr}: *${amtStr}*${itemNote}`;
+      return `    🌿 ${idx + 1}. ${dStr}: *${amtStr}*${itemNote}`;
     });
     pendingListText = `\n\n📌 *Date-Wise Pending Credit Bills (${data.pendingBills.length}):*\n` + lines.join('\n');
   }
@@ -274,23 +293,26 @@ export function buildWhatsAppCustomerStatementText(data: WhatsAppStatementData):
     ? `\n• 🎁 *Your Lifetime Savings:* *${formatINR(data.totalDiscount)}* 🎉`
     : '';
 
-  return `━━━━━━━━━━━━━━━━━━━━
+  return `🌸══════════════════════🌸
 🏥 *${pharmacy.toUpperCase()}*
 📋 *COMPLETE ACCOUNT STATEMENT*
-━━━━━━━━━━━━━━━━━━━━
+🌸══════════════════════🌸
 
-Hello *${customerGreeting}*,
+Hello *${customerGreeting}* 🌸,
 
-Here is your full account statement and balance summary from *${pharmacy}*:
+Here is your full account statement and balance summary from *${pharmacy}*: 🌿
 
+🌸 • ────────────────── • 🌸
 📊 *Account Summary:*
 • Total Invoices: ${data.totalPurchasesCount}
 • Total Billed: *${totalBilledStr}*
 • Total Paid: *${totalPaidStr}*${savingsLine}
-• 🔴 *Total Cumulative Outstanding:* *${balanceStr}*${pendingListText}${upiLine}
+• 🔴 *Total Outstanding Balance:* *${balanceStr}*
+🌸 • ────────────────── • 🌸${pendingListText}${upiLine}
 
 Please settle the cumulative outstanding balance at your earliest convenience.
-Thank you for choosing *${pharmacy}*! 🙏`;
+🙏 *Thank you for choosing ${pharmacy}!* 🌿
+✨ *Wishing you good health & happiness!* 🌸`;
 }
 
 /**
