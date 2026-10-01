@@ -92,16 +92,22 @@ export default function DashboardPage() {
           if (data.settings.upi_id) setUpiId(data.settings.upi_id);
         }
       })
-      .catch((e) => console.error(e));
-  }, []);
+  const [sendingMap, setSendingMap] = useState<Record<string, boolean>>({});
+  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const handleSendManualReminder = (purchase: Purchase) => {
+  const showToast = (type: 'success' | 'error', text: string) => {
+    setToastMessage({ type, text });
+    setTimeout(() => setToastMessage(null), 5000);
+  };
+
+  const handleSendManualReminder = async (purchase: Purchase) => {
     const phone = purchase.customer?.whatsapp_number || '';
+    const customerName = purchase.customer?.name || 'Customer';
     const pendingDays = getPendingDaysCount(purchase.purchase_date);
     const balanceDue = purchase.balance_due !== undefined ? purchase.balance_due : Number(purchase.amount_payable);
 
     const reminderText = buildWhatsAppReminderText({
-      customerName: purchase.customer?.name || 'Customer',
+      customerName,
       recipientPhone: phone,
       purchaseDate: purchase.purchase_date,
       pendingDays,
@@ -112,14 +118,41 @@ export default function DashboardPage() {
       upiId,
     });
 
-    const chatUrl = getWhatsAppDirectUrl(phone, reminderText);
-    window.open(chatUrl, '_blank', 'noopener,noreferrer');
+    setSendingMap((prev) => ({ ...prev, [purchase.id]: true }));
+
+    try {
+      const res = await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: phone,
+          message: reminderText,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast('success', `✅ WhatsApp reminder sent automatically to ${customerName}!`);
+      } else {
+        // Fallback to WhatsApp Web if gateway error
+        const chatUrl = getWhatsAppDirectUrl(phone, reminderText);
+        window.open(chatUrl, '_blank', 'noopener,noreferrer');
+        showToast('error', `Gateway issue: ${data?.error || 'Opened in WhatsApp Web'}`);
+      }
+    } catch (err: any) {
+      const chatUrl = getWhatsAppDirectUrl(phone, reminderText);
+      window.open(chatUrl, '_blank', 'noopener,noreferrer');
+      showToast('error', `Network error. Opened in WhatsApp Web.`);
+    } finally {
+      setSendingMap((prev) => ({ ...prev, [purchase.id]: false }));
+    }
   };
 
-  const handleSendManualThankYou = (purchase: Purchase) => {
+  const handleSendManualThankYou = async (purchase: Purchase) => {
     const phone = purchase.customer?.whatsapp_number || '';
+    const customerName = purchase.customer?.name || 'Customer';
     const thankYouText = buildWhatsAppThankYouText({
-      customerName: purchase.customer?.name || 'Customer',
+      customerName,
       recipientPhone: phone,
       amountReceived: Number(purchase.paid_amount || purchase.amount_payable),
       totalBillAmount: Number(purchase.amount_payable),
@@ -128,8 +161,33 @@ export default function DashboardPage() {
       pharmacyName,
     });
 
-    const chatUrl = getWhatsAppDirectUrl(phone, thankYouText);
-    window.open(chatUrl, '_blank', 'noopener,noreferrer');
+    setSendingMap((prev) => ({ ...prev, [purchase.id]: true }));
+
+    try {
+      const res = await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: phone,
+          message: thankYouText,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast('success', `✅ Thank-you receipt sent automatically to ${customerName}!`);
+      } else {
+        const chatUrl = getWhatsAppDirectUrl(phone, thankYouText);
+        window.open(chatUrl, '_blank', 'noopener,noreferrer');
+        showToast('error', `Gateway issue: ${data?.error || 'Opened in WhatsApp Web'}`);
+      }
+    } catch (err: any) {
+      const chatUrl = getWhatsAppDirectUrl(phone, thankYouText);
+      window.open(chatUrl, '_blank', 'noopener,noreferrer');
+      showToast('error', `Network error. Opened in WhatsApp Web.`);
+    } finally {
+      setSendingMap((prev) => ({ ...prev, [purchase.id]: false }));
+    }
   };
 
   const handleManualRefresh = () => {
@@ -187,6 +245,24 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
+      {/* Toast Alert */}
+      {toastMessage && (
+        <div
+          className={`fixed top-20 right-4 z-50 p-4 rounded-2xl shadow-xl border text-xs font-bold flex items-center gap-2.5 animate-in slide-in-from-top-4 duration-200 ${
+            toastMessage.type === 'success'
+              ? 'bg-emerald-50 text-emerald-900 border-emerald-300 shadow-emerald-500/20'
+              : 'bg-rose-50 text-rose-900 border-rose-300 shadow-rose-500/20'
+          }`}
+        >
+          {toastMessage.type === 'success' ? (
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+          ) : (
+            <AlertTriangle className="w-4 h-4 text-rose-600 flex-shrink-0" />
+          )}
+          <span>{toastMessage.text}</span>
+        </div>
+      )}
+
       {/* Top Banner */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -475,11 +551,16 @@ export default function DashboardPage() {
                               <>
                                 <button
                                   onClick={() => handleSendManualReminder(purchase)}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold transition-all"
-                                  title="Open WhatsApp Web chat with reminder"
+                                  disabled={sendingMap[purchase.id]}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold transition-all disabled:opacity-50"
+                                  title="Send WhatsApp Reminder automatically"
                                 >
-                                  <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
-                                  <span>Reminder</span>
+                                  {sendingMap[purchase.id] ? (
+                                    <div className="w-3.5 h-3.5 border-2 border-emerald-600/30 border-t-emerald-600 rounded-full animate-spin" />
+                                  ) : (
+                                    <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                                  )}
+                                  <span>{sendingMap[purchase.id] ? 'Sending...' : 'Reminder'}</span>
                                 </button>
 
                                 <button
@@ -493,11 +574,16 @@ export default function DashboardPage() {
                             ) : (
                               <button
                                 onClick={() => handleSendManualThankYou(purchase)}
-                                className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold transition-all"
-                                title="Open WhatsApp Web chat with Thank-You message"
+                                disabled={sendingMap[purchase.id]}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold transition-all disabled:opacity-50"
+                                title="Send WhatsApp Thank-You receipt automatically"
                               >
-                                <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
-                                <span>Thank-You</span>
+                                {sendingMap[purchase.id] ? (
+                                  <div className="w-3.5 h-3.5 border-2 border-emerald-600/30 border-t-emerald-600 rounded-full animate-spin" />
+                                ) : (
+                                  <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                                )}
+                                <span>{sendingMap[purchase.id] ? 'Sending...' : 'Thank-You'}</span>
                               </button>
                             )}
                           </div>
@@ -581,11 +667,16 @@ export default function DashboardPage() {
                           <>
                             <button
                               onClick={() => handleSendManualReminder(purchase)}
-                              className="px-2.5 py-1.5 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold flex items-center gap-1"
-                              title="Send Reminder on WhatsApp"
+                              disabled={sendingMap[purchase.id]}
+                              className="px-2.5 py-1.5 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold flex items-center gap-1 disabled:opacity-50"
+                              title="Send Reminder on WhatsApp automatically"
                             >
-                              <MessageCircle className="w-3 h-3 text-emerald-600" />
-                              <span>Reminder</span>
+                              {sendingMap[purchase.id] ? (
+                                <div className="w-3 h-3 border-2 border-emerald-600/30 border-t-emerald-600 rounded-full animate-spin" />
+                              ) : (
+                                <MessageCircle className="w-3 h-3 text-emerald-600" />
+                              )}
+                              <span>{sendingMap[purchase.id] ? 'Sending...' : 'Reminder'}</span>
                             </button>
 
                             <button
@@ -598,10 +689,19 @@ export default function DashboardPage() {
                         ) : (
                           <button
                             onClick={() => handleSendManualThankYou(purchase)}
-                            className="px-2.5 py-1.5 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold flex items-center gap-1"
-                            title="Send Thank-You on WhatsApp"
+                            disabled={sendingMap[purchase.id]}
+                            className="px-2.5 py-1.5 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold flex items-center gap-1 disabled:opacity-50"
+                            title="Send Thank-You on WhatsApp automatically"
                           >
-                            <MessageCircle className="w-3 h-3 text-emerald-600" />
+                            {sendingMap[purchase.id] ? (
+                              <div className="w-3 h-3 border-2 border-emerald-600/30 border-t-emerald-600 rounded-full animate-spin" />
+                            ) : (
+                              <MessageCircle className="w-3 h-3 text-emerald-600" />
+                            )}
+                            <span>{sendingMap[purchase.id] ? 'Sending...' : 'Thank-You'}</span>
+                          </button>
+                        )}
+                      </div>
                             <span>Thank-You</span>
                           </button>
                         )}

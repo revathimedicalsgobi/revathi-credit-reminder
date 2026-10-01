@@ -131,14 +131,23 @@ function PurchaseDetailContent() {
     }
   };
 
-  const handleSendManualReminder = () => {
+  const [isSendingDirect, setIsSendingDirect] = useState(false);
+  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const showToast = (type: 'success' | 'error', text: string) => {
+    setToastMessage({ type, text });
+    setTimeout(() => setToastMessage(null), 5000);
+  };
+
+  const handleSendManualReminder = async () => {
     if (!purchase) return;
     const phone = purchase.customer?.whatsapp_number || '';
+    const customerName = purchase.customer?.name || 'Customer';
     const pendingDays = getPendingDaysCount(purchase.purchase_date);
     const balanceDue = purchase.balance_due !== undefined ? purchase.balance_due : Number(purchase.amount_payable);
 
     const reminderText = buildWhatsAppReminderText({
-      customerName: purchase.customer?.name || 'Customer',
+      customerName,
       recipientPhone: phone,
       purchaseDate: purchase.purchase_date,
       pendingDays,
@@ -149,15 +158,41 @@ function PurchaseDetailContent() {
       upiId,
     });
 
-    const chatUrl = getWhatsAppDirectUrl(phone, reminderText);
-    window.open(chatUrl, '_blank', 'noopener,noreferrer');
+    setIsSendingDirect(true);
+
+    try {
+      const res = await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: phone,
+          message: reminderText,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast('success', `✅ WhatsApp reminder sent automatically to ${customerName}!`);
+      } else {
+        const chatUrl = getWhatsAppDirectUrl(phone, reminderText);
+        window.open(chatUrl, '_blank', 'noopener,noreferrer');
+        showToast('error', `Gateway issue: ${data?.error || 'Opened in WhatsApp Web'}`);
+      }
+    } catch (err: any) {
+      const chatUrl = getWhatsAppDirectUrl(phone, reminderText);
+      window.open(chatUrl, '_blank', 'noopener,noreferrer');
+      showToast('error', `Network error. Opened in WhatsApp Web.`);
+    } finally {
+      setIsSendingDirect(false);
+    }
   };
 
-  const handleSendManualThankYou = () => {
+  const handleSendManualThankYou = async () => {
     if (!purchase) return;
     const phone = purchase.customer?.whatsapp_number || '';
+    const customerName = purchase.customer?.name || 'Customer';
     const thankYouText = buildWhatsAppThankYouText({
-      customerName: purchase.customer?.name || 'Customer',
+      customerName,
       recipientPhone: phone,
       amountReceived: Number(purchase.paid_amount || purchase.amount_payable),
       totalBillAmount: Number(purchase.amount_payable),
@@ -166,15 +201,41 @@ function PurchaseDetailContent() {
       pharmacyName,
     });
 
-    const chatUrl = getWhatsAppDirectUrl(phone, thankYouText);
-    window.open(chatUrl, '_blank', 'noopener,noreferrer');
+    setIsSendingDirect(true);
+
+    try {
+      const res = await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: phone,
+          message: thankYouText,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast('success', `✅ Thank-you receipt sent automatically to ${customerName}!`);
+      } else {
+        const chatUrl = getWhatsAppDirectUrl(phone, thankYouText);
+        window.open(chatUrl, '_blank', 'noopener,noreferrer');
+        showToast('error', `Gateway issue: ${data?.error || 'Opened in WhatsApp Web'}`);
+      }
+    } catch (err: any) {
+      const chatUrl = getWhatsAppDirectUrl(phone, thankYouText);
+      window.open(chatUrl, '_blank', 'noopener,noreferrer');
+      showToast('error', `Network error. Opened in WhatsApp Web.`);
+    } finally {
+      setIsSendingDirect(false);
+    }
   };
 
-  const handleSendCumulativeStatement = () => {
+  const handleSendCumulativeStatement = async () => {
     if (!purchase) return;
     const phone = purchase.customer?.whatsapp_number || '';
+    const customerName = purchase.customer?.name || 'Customer';
     const text = buildWhatsAppSummaryText({
-      customerName: purchase.customer?.name || 'Customer',
+      customerName,
       recipientPhone: phone,
       purchaseDate: purchase.purchase_date,
       items: (purchase.items || []).map((i) => ({
@@ -196,8 +257,33 @@ function PurchaseDetailContent() {
       dateWisePendingBills,
     });
 
-    const chatUrl = getWhatsAppDirectUrl(phone, text);
-    window.open(chatUrl, '_blank', 'noopener,noreferrer');
+    setIsSendingDirect(true);
+
+    try {
+      const res = await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: phone,
+          message: text,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast('success', `✅ Purchase summary & statement sent automatically to ${customerName}!`);
+      } else {
+        const chatUrl = getWhatsAppDirectUrl(phone, text);
+        window.open(chatUrl, '_blank', 'noopener,noreferrer');
+        showToast('error', `Gateway issue: ${data?.error || 'Opened in WhatsApp Web'}`);
+      }
+    } catch (err: any) {
+      const chatUrl = getWhatsAppDirectUrl(phone, text);
+      window.open(chatUrl, '_blank', 'noopener,noreferrer');
+      showToast('error', `Network error. Opened in WhatsApp Web.`);
+    } finally {
+      setIsSendingDirect(false);
+    }
   };
 
   const handleConfirmPayment = async (paymentData: { amount: number; payment_mode: PaymentMode; notes?: string }) => {

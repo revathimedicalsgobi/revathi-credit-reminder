@@ -152,7 +152,15 @@ export default function CustomerMasterPage() {
     }
   };
 
-  const handleSendWhatsAppStatement = (customer: CustomerMasterItem) => {
+  const [sendingCustMap, setSendingCustMap] = useState<Record<string, boolean>>({});
+  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const showToast = (type: 'success' | 'error', text: string) => {
+    setToastMessage({ type, text });
+    setTimeout(() => setToastMessage(null), 5000);
+  };
+
+  const handleSendWhatsAppStatement = async (customer: CustomerMasterItem) => {
     const text = buildWhatsAppCustomerStatementText({
       customerName: customer.name,
       recipientPhone: customer.whatsapp_number,
@@ -165,8 +173,33 @@ export default function CustomerMasterPage() {
       upiId,
     });
 
-    const chatUrl = getWhatsAppDirectUrl(customer.whatsapp_number, text);
-    window.open(chatUrl, '_blank', 'noopener,noreferrer');
+    setSendingCustMap((prev) => ({ ...prev, [customer.id]: true }));
+
+    try {
+      const res = await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: customer.whatsapp_number,
+          message: text,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast('success', `✅ Account statement sent automatically to ${customer.name}!`);
+      } else {
+        const chatUrl = getWhatsAppDirectUrl(customer.whatsapp_number, text);
+        window.open(chatUrl, '_blank', 'noopener,noreferrer');
+        showToast('error', `Gateway issue: ${data?.error || 'Opened in WhatsApp Web'}`);
+      }
+    } catch (err: any) {
+      const chatUrl = getWhatsAppDirectUrl(customer.whatsapp_number, text);
+      window.open(chatUrl, '_blank', 'noopener,noreferrer');
+      showToast('error', `Network error. Opened in WhatsApp Web.`);
+    } finally {
+      setSendingCustMap((prev) => ({ ...prev, [customer.id]: false }));
+    }
   };
 
   const sortedCustomers = [...customers].sort((a, b) => {

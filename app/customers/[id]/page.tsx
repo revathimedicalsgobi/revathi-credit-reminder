@@ -176,7 +176,16 @@ export default function CustomerStatementDetailPage() {
     }
   };
 
-  const handleSendWhatsAppStatement = () => {
+  const [isSendingStatement, setIsSendingStatement] = useState(false);
+  const [sendingSingleMap, setSendingSingleMap] = useState<Record<string, boolean>>({});
+  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const showToast = (type: 'success' | 'error', text: string) => {
+    setToastMessage({ type, text });
+    setTimeout(() => setToastMessage(null), 5000);
+  };
+
+  const handleSendWhatsAppStatement = async () => {
     if (!statement) return;
     const pendingBills = statement.purchases
       .filter((p) => p.payment_status !== 'PAID')
@@ -197,11 +206,36 @@ export default function CustomerStatementDetailPage() {
       upiId,
     });
 
-    const chatUrl = getWhatsAppDirectUrl(statement.customer.whatsapp_number, text);
-    window.open(chatUrl, '_blank', 'noopener,noreferrer');
+    setIsSendingStatement(true);
+
+    try {
+      const res = await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: statement.customer.whatsapp_number,
+          message: text,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast('success', `✅ Full account statement sent automatically to ${statement.customer.name}!`);
+      } else {
+        const chatUrl = getWhatsAppDirectUrl(statement.customer.whatsapp_number, text);
+        window.open(chatUrl, '_blank', 'noopener,noreferrer');
+        showToast('error', `Gateway issue: ${data?.error || 'Opened in WhatsApp Web'}`);
+      }
+    } catch (err: any) {
+      const chatUrl = getWhatsAppDirectUrl(statement.customer.whatsapp_number, text);
+      window.open(chatUrl, '_blank', 'noopener,noreferrer');
+      showToast('error', `Network error. Opened in WhatsApp Web.`);
+    } finally {
+      setIsSendingStatement(false);
+    }
   };
 
-  const handleSendSingleReminder = (purchase: CustomerStatementData['purchases'][0]) => {
+  const handleSendSingleReminder = async (purchase: CustomerStatementData['purchases'][0]) => {
     if (!statement) return;
     const pendingDays = getPendingDaysCount(purchase.purchase_date);
     const balanceDue = purchase.balance_due !== undefined ? purchase.balance_due : Number(purchase.amount_payable);
@@ -218,11 +252,36 @@ export default function CustomerStatementDetailPage() {
       upiId,
     });
 
-    const chatUrl = getWhatsAppDirectUrl(statement.customer.whatsapp_number, reminderText);
-    window.open(chatUrl, '_blank', 'noopener,noreferrer');
+    setSendingSingleMap((prev) => ({ ...prev, [purchase.id]: true }));
+
+    try {
+      const res = await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: statement.customer.whatsapp_number,
+          message: reminderText,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast('success', `✅ WhatsApp reminder sent automatically to ${statement.customer.name}!`);
+      } else {
+        const chatUrl = getWhatsAppDirectUrl(statement.customer.whatsapp_number, reminderText);
+        window.open(chatUrl, '_blank', 'noopener,noreferrer');
+        showToast('error', `Gateway issue: ${data?.error || 'Opened in WhatsApp Web'}`);
+      }
+    } catch (err: any) {
+      const chatUrl = getWhatsAppDirectUrl(statement.customer.whatsapp_number, reminderText);
+      window.open(chatUrl, '_blank', 'noopener,noreferrer');
+      showToast('error', `Network error. Opened in WhatsApp Web.`);
+    } finally {
+      setSendingSingleMap((prev) => ({ ...prev, [purchase.id]: false }));
+    }
   };
 
-  const handleSendThankYou = (purchase: CustomerStatementData['purchases'][0]) => {
+  const handleSendThankYou = async (purchase: CustomerStatementData['purchases'][0]) => {
     if (!statement) return;
     const text = buildWhatsAppThankYouText({
       customerName: statement.customer.name,
@@ -234,8 +293,33 @@ export default function CustomerStatementDetailPage() {
       pharmacyName,
     });
 
-    const chatUrl = getWhatsAppDirectUrl(statement.customer.whatsapp_number, text);
-    window.open(chatUrl, '_blank', 'noopener,noreferrer');
+    setSendingSingleMap((prev) => ({ ...prev, [purchase.id]: true }));
+
+    try {
+      const res = await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: statement.customer.whatsapp_number,
+          message: text,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast('success', `✅ Thank-you receipt sent automatically to ${statement.customer.name}!`);
+      } else {
+        const chatUrl = getWhatsAppDirectUrl(statement.customer.whatsapp_number, text);
+        window.open(chatUrl, '_blank', 'noopener,noreferrer');
+        showToast('error', `Gateway issue: ${data?.error || 'Opened in WhatsApp Web'}`);
+      }
+    } catch (err: any) {
+      const chatUrl = getWhatsAppDirectUrl(statement.customer.whatsapp_number, text);
+      window.open(chatUrl, '_blank', 'noopener,noreferrer');
+      showToast('error', `Network error. Opened in WhatsApp Web.`);
+    } finally {
+      setSendingSingleMap((prev) => ({ ...prev, [purchase.id]: false }));
+    }
   };
 
   const handleConfirmPaymentReceived = async (paymentData: { amount: number; payment_mode: PaymentMode; notes?: string }) => {
