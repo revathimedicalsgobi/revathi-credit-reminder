@@ -39,8 +39,8 @@ export function formatPhoneForGateway(phone: string): string {
  * Gets configured UltraMsg instance ID and token
  */
 export function getGatewayCredentials(config?: WhatsAppGatewayConfig) {
-  const instanceId = config?.instanceId || process.env.ULTRAMSG_INSTANCE_ID || '';
-  const token = config?.token || process.env.ULTRAMSG_TOKEN || '';
+  const instanceId = config?.instanceId || process.env.ULTRAMSG_INSTANCE_ID || 'instance193144';
+  const token = config?.token || process.env.ULTRAMSG_TOKEN || 'wa5p454vsbxagrso';
   return { instanceId, token };
 }
 

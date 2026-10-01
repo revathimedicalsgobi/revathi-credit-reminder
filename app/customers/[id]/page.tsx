@@ -222,14 +222,10 @@ export default function CustomerStatementDetailPage() {
       if (res.ok && data.success) {
         showToast('success', `✅ Full account statement sent automatically to ${statement.customer.name}!`);
       } else {
-        const chatUrl = getWhatsAppDirectUrl(statement.customer.whatsapp_number, text);
-        window.open(chatUrl, '_blank', 'noopener,noreferrer');
-        showToast('error', `Gateway issue: ${data?.error || 'Opened in WhatsApp Web'}`);
+        showToast('error', `❌ Failed: ${data?.error || 'Gateway error'}`);
       }
     } catch (err: any) {
-      const chatUrl = getWhatsAppDirectUrl(statement.customer.whatsapp_number, text);
-      window.open(chatUrl, '_blank', 'noopener,noreferrer');
-      showToast('error', `Network error. Opened in WhatsApp Web.`);
+      showToast('error', `❌ Network error: ${err?.message || 'Please check connection'}`);
     } finally {
       setIsSendingStatement(false);
     }
@@ -268,14 +264,10 @@ export default function CustomerStatementDetailPage() {
       if (res.ok && data.success) {
         showToast('success', `✅ WhatsApp reminder sent automatically to ${statement.customer.name}!`);
       } else {
-        const chatUrl = getWhatsAppDirectUrl(statement.customer.whatsapp_number, reminderText);
-        window.open(chatUrl, '_blank', 'noopener,noreferrer');
-        showToast('error', `Gateway issue: ${data?.error || 'Opened in WhatsApp Web'}`);
+        showToast('error', `❌ Failed: ${data?.error || 'Gateway error'}`);
       }
     } catch (err: any) {
-      const chatUrl = getWhatsAppDirectUrl(statement.customer.whatsapp_number, reminderText);
-      window.open(chatUrl, '_blank', 'noopener,noreferrer');
-      showToast('error', `Network error. Opened in WhatsApp Web.`);
+      showToast('error', `❌ Network error: ${err?.message || 'Please check connection'}`);
     } finally {
       setSendingSingleMap((prev) => ({ ...prev, [purchase.id]: false }));
     }
@@ -309,14 +301,10 @@ export default function CustomerStatementDetailPage() {
       if (res.ok && data.success) {
         showToast('success', `✅ Thank-you receipt sent automatically to ${statement.customer.name}!`);
       } else {
-        const chatUrl = getWhatsAppDirectUrl(statement.customer.whatsapp_number, text);
-        window.open(chatUrl, '_blank', 'noopener,noreferrer');
-        showToast('error', `Gateway issue: ${data?.error || 'Opened in WhatsApp Web'}`);
+        showToast('error', `❌ Failed: ${data?.error || 'Gateway error'}`);
       }
     } catch (err: any) {
-      const chatUrl = getWhatsAppDirectUrl(statement.customer.whatsapp_number, text);
-      window.open(chatUrl, '_blank', 'noopener,noreferrer');
-      showToast('error', `Network error. Opened in WhatsApp Web.`);
+      showToast('error', `❌ Network error: ${err?.message || 'Please check connection'}`);
     } finally {
       setSendingSingleMap((prev) => ({ ...prev, [purchase.id]: false }));
     }

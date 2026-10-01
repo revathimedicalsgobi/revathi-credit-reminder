@@ -134,15 +134,10 @@ export default function DashboardPage() {
       if (res.ok && data.success) {
         showToast('success', `✅ WhatsApp reminder sent automatically to ${customerName}!`);
       } else {
-        // Fallback to WhatsApp Web if gateway error
-        const chatUrl = getWhatsAppDirectUrl(phone, reminderText);
-        window.open(chatUrl, '_blank', 'noopener,noreferrer');
-        showToast('error', `Gateway issue: ${data?.error || 'Opened in WhatsApp Web'}`);
+        showToast('error', `❌ Failed to send WhatsApp reminder: ${data?.error || 'Gateway error'}`);
       }
     } catch (err: any) {
-      const chatUrl = getWhatsAppDirectUrl(phone, reminderText);
-      window.open(chatUrl, '_blank', 'noopener,noreferrer');
-      showToast('error', `Network error. Opened in WhatsApp Web.`);
+      showToast('error', `❌ Network error sending WhatsApp reminder: ${err?.message || 'Please check connection'}`);
     } finally {
       setSendingMap((prev) => ({ ...prev, [purchase.id]: false }));
     }
@@ -177,14 +172,10 @@ export default function DashboardPage() {
       if (res.ok && data.success) {
         showToast('success', `✅ Thank-you receipt sent automatically to ${customerName}!`);
       } else {
-        const chatUrl = getWhatsAppDirectUrl(phone, thankYouText);
-        window.open(chatUrl, '_blank', 'noopener,noreferrer');
-        showToast('error', `Gateway issue: ${data?.error || 'Opened in WhatsApp Web'}`);
+        showToast('error', `❌ Failed to send Thank-You receipt: ${data?.error || 'Gateway error'}`);
       }
     } catch (err: any) {
-      const chatUrl = getWhatsAppDirectUrl(phone, thankYouText);
-      window.open(chatUrl, '_blank', 'noopener,noreferrer');
-      showToast('error', `Network error. Opened in WhatsApp Web.`);
+      showToast('error', `❌ Network error sending Thank-You receipt: ${err?.message || 'Please check connection'}`);
     } finally {
       setSendingMap((prev) => ({ ...prev, [purchase.id]: false }));
     }

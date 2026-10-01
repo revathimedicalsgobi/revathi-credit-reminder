@@ -174,14 +174,10 @@ function PurchaseDetailContent() {
       if (res.ok && data.success) {
         showToast('success', `✅ WhatsApp reminder sent automatically to ${customerName}!`);
       } else {
-        const chatUrl = getWhatsAppDirectUrl(phone, reminderText);
-        window.open(chatUrl, '_blank', 'noopener,noreferrer');
-        showToast('error', `Gateway issue: ${data?.error || 'Opened in WhatsApp Web'}`);
+        showToast('error', `❌ Failed: ${data?.error || 'Gateway error'}`);
       }
     } catch (err: any) {
-      const chatUrl = getWhatsAppDirectUrl(phone, reminderText);
-      window.open(chatUrl, '_blank', 'noopener,noreferrer');
-      showToast('error', `Network error. Opened in WhatsApp Web.`);
+      showToast('error', `❌ Network error: ${err?.message || 'Please check connection'}`);
     } finally {
       setIsSendingDirect(false);
     }
@@ -217,14 +213,10 @@ function PurchaseDetailContent() {
       if (res.ok && data.success) {
         showToast('success', `✅ Thank-you receipt sent automatically to ${customerName}!`);
       } else {
-        const chatUrl = getWhatsAppDirectUrl(phone, thankYouText);
-        window.open(chatUrl, '_blank', 'noopener,noreferrer');
-        showToast('error', `Gateway issue: ${data?.error || 'Opened in WhatsApp Web'}`);
+        showToast('error', `❌ Failed: ${data?.error || 'Gateway error'}`);
       }
     } catch (err: any) {
-      const chatUrl = getWhatsAppDirectUrl(phone, thankYouText);
-      window.open(chatUrl, '_blank', 'noopener,noreferrer');
-      showToast('error', `Network error. Opened in WhatsApp Web.`);
+      showToast('error', `❌ Network error: ${err?.message || 'Please check connection'}`);
     } finally {
       setIsSendingDirect(false);
     }
@@ -273,14 +265,10 @@ function PurchaseDetailContent() {
       if (res.ok && data.success) {
         showToast('success', `✅ Purchase summary & statement sent automatically to ${customerName}!`);
       } else {
-        const chatUrl = getWhatsAppDirectUrl(phone, text);
-        window.open(chatUrl, '_blank', 'noopener,noreferrer');
-        showToast('error', `Gateway issue: ${data?.error || 'Opened in WhatsApp Web'}`);
+        showToast('error', `❌ Failed: ${data?.error || 'Gateway error'}`);
       }
     } catch (err: any) {
-      const chatUrl = getWhatsAppDirectUrl(phone, text);
-      window.open(chatUrl, '_blank', 'noopener,noreferrer');
-      showToast('error', `Network error. Opened in WhatsApp Web.`);
+      showToast('error', `❌ Network error: ${err?.message || 'Please check connection'}`);
     } finally {
       setIsSendingDirect(false);
     }
