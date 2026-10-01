@@ -20,6 +20,8 @@ export interface WhatsAppShareData {
   totalDiscount: number;
   roundOff?: number;
   amountPayable: number;
+  paidAmount?: number;
+  balanceDue?: number;
   pharmacyName?: string;
   upiId?: string | null;
   previousBalance?: number;
@@ -58,6 +60,11 @@ export function buildWhatsAppSummaryText(data: WhatsAppShareData): string {
   const previousBal = Number(data.previousBalance || 0);
   const cumulativeTotal = Number(data.cumulativeTotal || (previousBal + data.amountPayable));
 
+  let partialLine = '';
+  if (data.paidAmount && data.paidAmount > 0 && (data.balanceDue !== undefined && data.balanceDue > 0)) {
+    partialLine = `\n💵 *Paid Amount:* ${formatINR(data.paidAmount)}\n⏳ *Remaining Balance:* *${formatINR(data.balanceDue)}*`;
+  }
+
   if (previousBal > 0) {
     let dateWiseList = '';
     if (data.dateWisePendingBills && data.dateWisePendingBills.length > 0) {
@@ -81,7 +88,7 @@ Thank you for your visit. Here is your bill and cumulative account statement:
 ${itemsList}
 
 ───────────────────────
-💵 *Today's Bill Amount:* *${billAmountStr}*
+💵 *Today's Bill Amount:* *${billAmountStr}*${partialLine}
 ───────────────────────
 
 📌 *Previous Unpaid Credit (Date-Wise):*
@@ -111,7 +118,7 @@ Thank you for your purchase from *${pharmacy}*.
 ${itemsList}
 
 ───────────────────────
-💰 *Total Amount Payable:* *${billAmountStr}*
+💰 *Total Bill Amount:* *${billAmountStr}*${partialLine}
 *Payment Status:* ⏳ Pending (Credit)
 ───────────────────────${upiLine}
 
@@ -124,6 +131,8 @@ export interface WhatsAppReminderData {
   purchaseDate: string | Date;
   pendingDays: number;
   amountPending: number;
+  totalBillAmount?: number;
+  paidAmount?: number;
   pharmacyName?: string;
   upiId?: string | null;
 }
@@ -138,11 +147,16 @@ export function buildWhatsAppReminderText(data: WhatsAppReminderData): string {
   const daysText = data.pendingDays === 0 ? 'Today' : data.pendingDays === 1 ? '1 day' : `${data.pendingDays} days`;
   const upiLine = data.upiId ? `\n💳 *UPI ID:* ${data.upiId}` : '';
 
+  let breakdownText = `💰 *Amount Pending:* *${pendingStr}*`;
+  if (data.paidAmount && data.paidAmount > 0 && data.totalBillAmount && data.totalBillAmount > data.amountPending) {
+    breakdownText = `📋 *Total Bill:* ${formatINR(data.totalBillAmount)}\n💵 *Already Paid:* ${formatINR(data.paidAmount)}\n⏳ *Remaining Balance Due:* *${pendingStr}*`;
+  }
+
   return `Hello *${data.customerName}*,
 
 This is a gentle payment reminder from *${pharmacy}* regarding your purchase on *${dateStr}* (Pending: ${daysText}).
 
-💰 *Amount Pending:* *${pendingStr}*${upiLine}
+${breakdownText}${upiLine}
 
 Please complete the payment at your earliest convenience.
 Thank you for your visit! 🙏`;
@@ -152,6 +166,9 @@ export interface WhatsAppThankYouData {
   customerName: string;
   recipientPhone: string;
   amountReceived: number;
+  totalBillAmount?: number;
+  remainingBalance?: number;
+  isPartial?: boolean;
   pharmacyName?: string;
 }
 
@@ -162,14 +179,34 @@ export function buildWhatsAppThankYouText(data: WhatsAppThankYouData): string {
   const pharmacy = data.pharmacyName || 'Revathi Medicals & Distributors';
   const amountStr = formatINR(data.amountReceived);
 
-  return `━━━━━━━━━━━━━━━━━━━━
+  if (data.isPartial && data.remainingBalance && data.remainingBalance > 0) {
+    const remainingStr = formatINR(data.remainingBalance);
+    const totalStr = data.totalBillAmount ? formatINR(data.totalBillAmount) : '';
+
+    return `━━━━━━━━━━━━━━━━━━━━
 🏥 *${pharmacy.toUpperCase()}*
-✅ *PAYMENT RECEIVED*
+💵 *PARTIAL PAYMENT RECEIVED*
 ━━━━━━━━━━━━━━━━━━━━
 
 Hello *${data.customerName}*,
 
 We have received your payment of *${amountStr}* successfully.
+
+📊 *Payment Details:*
+${totalStr ? `• *Total Bill Amount:* ${totalStr}\n` : ''}• *Amount Received:* *${amountStr}*
+• ⏳ *Remaining Balance Due:* *${remainingStr}*
+
+Thank you for choosing *${pharmacy}*. Please settle the remaining balance at your convenience! 🙏`;
+  }
+
+  return `━━━━━━━━━━━━━━━━━━━━
+🏥 *${pharmacy.toUpperCase()}*
+✅ *PAYMENT RECEIVED (SETTLED)*
+━━━━━━━━━━━━━━━━━━━━
+
+Hello *${data.customerName}*,
+
+We have received your payment of *${amountStr}* successfully. Your bill is now fully settled.
 
 Thank you for choosing *${pharmacy}*. We look forward to serving you again! 🙏`;
 }

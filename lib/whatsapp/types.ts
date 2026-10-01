@@ -45,6 +45,8 @@ export interface PaymentReminderMessagePayload {
   purchaseDate: string;
   pendingDays: number;
   amountPending: number;
+  totalBillAmount?: number;
+  paidAmount?: number;
   pharmacyName: string;
   upiId?: string | null;
   paymentQrUrl?: string | null;
@@ -55,6 +57,9 @@ export interface PaymentReceivedMessagePayload {
   recipientPhone: string;
   purchaseId: string;
   amountReceived: number;
+  totalBillAmount?: number;
+  remainingBalance?: number;
+  isPartial?: boolean;
   pharmacyName: string;
   paymentReceivedAt: string;
 }

@@ -17,6 +17,15 @@ export function PaymentStatusBadge({ status, className = '' }: PaymentStatusBadg
     );
   }
 
+  if (status === 'PARTIAL') {
+    return (
+      <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-800 border border-orange-200 ${className}`}>
+        <Clock className="w-3.5 h-3.5 text-orange-600" />
+        PARTIAL
+      </span>
+    );
+  }
+
   return (
     <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200 ${className}`}>
       <Clock className="w-3.5 h-3.5 text-amber-600" />

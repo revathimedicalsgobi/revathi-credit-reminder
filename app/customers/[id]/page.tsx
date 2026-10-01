@@ -23,6 +23,7 @@ import {
   User,
 } from 'lucide-react';
 import { formatINR } from '@/lib/calculations';
+import { PaymentMode } from '@/lib/types';
 import { getPendingAgeText, getPendingDaysCount, formatDisplayDate, formatShortDate, maskWhatsAppNumber } from '@/lib/utils';
 import { PaymentStatusBadge } from '@/components/StatusBadge';
 import { PaymentReceivedModal } from '@/components/PaymentReceivedModal';
@@ -47,7 +48,9 @@ interface CustomerStatementData {
     gross_total: number;
     total_discount: number;
     amount_payable: number;
-    payment_status: 'PENDING' | 'PAID';
+    paid_amount?: number;
+    balance_due?: number;
+    payment_status: 'PENDING' | 'PARTIAL' | 'PAID';
     payment_received_at: string | null;
     items: Array<{
       id: string;
@@ -98,6 +101,8 @@ export default function CustomerStatementDetailPage() {
   const [activePaymentModal, setActivePaymentModal] = useState<{
     purchaseId: string;
     amount: number;
+    paidAmount?: number;
+    balanceDue?: number;
   } | null>(null);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [paymentModalError, setPaymentModalError] = useState<string | null>(null);
@@ -174,10 +179,10 @@ export default function CustomerStatementDetailPage() {
   const handleSendWhatsAppStatement = () => {
     if (!statement) return;
     const pendingBills = statement.purchases
-      .filter((p) => p.payment_status === 'PENDING')
+      .filter((p) => p.payment_status !== 'PAID')
       .map((p) => ({
         date: p.purchase_date,
-        amount: Number(p.amount_payable),
+        amount: Number(p.balance_due !== undefined ? p.balance_due : p.amount_payable),
       }));
 
     const text = buildWhatsAppCustomerStatementText({
@@ -199,12 +204,16 @@ export default function CustomerStatementDetailPage() {
   const handleSendSingleReminder = (purchase: CustomerStatementData['purchases'][0]) => {
     if (!statement) return;
     const pendingDays = getPendingDaysCount(purchase.purchase_date);
+    const balanceDue = purchase.balance_due !== undefined ? purchase.balance_due : Number(purchase.amount_payable);
+
     const reminderText = buildWhatsAppReminderText({
       customerName: statement.customer.name,
       recipientPhone: statement.customer.whatsapp_number,
       purchaseDate: purchase.purchase_date,
       pendingDays,
-      amountPending: Number(purchase.amount_payable),
+      amountPending: balanceDue,
+      totalBillAmount: Number(purchase.amount_payable),
+      paidAmount: Number(purchase.paid_amount || 0),
       pharmacyName,
       upiId,
     });
@@ -218,7 +227,10 @@ export default function CustomerStatementDetailPage() {
     const text = buildWhatsAppThankYouText({
       customerName: statement.customer.name,
       recipientPhone: statement.customer.whatsapp_number,
-      amountReceived: Number(purchase.amount_payable),
+      amountReceived: Number(purchase.paid_amount || purchase.amount_payable),
+      totalBillAmount: Number(purchase.amount_payable),
+      remainingBalance: purchase.balance_due,
+      isPartial: purchase.payment_status === 'PARTIAL',
       pharmacyName,
     });
 
@@ -226,7 +238,7 @@ export default function CustomerStatementDetailPage() {
     window.open(chatUrl, '_blank', 'noopener,noreferrer');
   };
 
-  const handleConfirmPaymentReceived = async () => {
+  const handleConfirmPaymentReceived = async (paymentData: { amount: number; payment_mode: PaymentMode; notes?: string }) => {
     if (!activePaymentModal) return;
     setIsProcessingPayment(true);
     setPaymentModalError(null);
@@ -234,11 +246,13 @@ export default function CustomerStatementDetailPage() {
     try {
       const res = await fetch(`/api/purchases/${activePaymentModal.purchaseId}/payment-received`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(paymentData),
       });
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data?.error || 'Failed to mark payment as received');
+        throw new Error(data?.error || 'Failed to record payment');
       }
 
       setActivePaymentModal(null);
@@ -282,7 +296,8 @@ export default function CustomerStatementDetailPage() {
 
   const filteredPurchases = statement.purchases.filter((p) => {
     if (statusFilter === 'ALL') return true;
-    return p.payment_status === statusFilter;
+    if (statusFilter === 'PENDING') return p.payment_status === 'PENDING' || p.payment_status === 'PARTIAL';
+    return p.payment_status === 'PAID';
   });
 
   const hasOutstanding = statement.summary.outstanding_balance > 0;
@@ -463,7 +478,7 @@ export default function CustomerStatementDetailPage() {
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Pending ({statement.summary.pending_bills_count})
+              Pending & Partial ({statement.summary.pending_bills_count})
             </button>
             <button
               onClick={() => setStatusFilter('PAID')}
@@ -495,14 +510,17 @@ export default function CustomerStatementDetailPage() {
                     <th className="py-3.5 px-4">Gross Total</th>
                     <th className="py-3.5 px-4">Discount</th>
                     <th className="py-3.5 px-4">Net Amount</th>
+                    <th className="py-3.5 px-4">Pending Due</th>
                     <th className="py-3.5 px-4">Status</th>
                     <th className="py-3.5 px-6 text-right no-print">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredPurchases.map((purchase) => {
-                    const isPending = purchase.payment_status === 'PENDING';
+                    const isPending = purchase.payment_status === 'PENDING' || purchase.payment_status === 'PARTIAL';
                     const pendingAge = getPendingAgeText(purchase.purchase_date);
+                    const paidAmt = Number(purchase.paid_amount || 0);
+                    const balDue = purchase.balance_due !== undefined ? purchase.balance_due : (isPending ? Number(purchase.amount_payable) : 0);
 
                     return (
                       <tr key={purchase.id} className="hover:bg-slate-50/80 transition-colors">
@@ -529,28 +547,30 @@ export default function CustomerStatementDetailPage() {
                         <td className="py-4 px-4 text-xs font-mono text-emerald-700 whitespace-nowrap">
                           {Number(purchase.total_discount) > 0 ? formatINR(purchase.total_discount) : '—'}
                         </td>
-                        <td className="py-4 px-4 font-black text-slate-900 whitespace-nowrap text-sm">
+                        <td className="py-4 px-4 font-bold text-slate-700 whitespace-nowrap text-xs">
                           {formatINR(purchase.amount_payable)}
                         </td>
                         <td className="py-4 px-4 whitespace-nowrap">
                           {isPending ? (
-                            <div className="space-y-0.5">
-                              <PaymentStatusBadge status="PENDING" />
-                              <div className="text-[10px] text-amber-700 font-semibold">{pendingAge}</div>
-                            </div>
-                          ) : (
-                            <div className="space-y-0.5">
-                              <PaymentStatusBadge status="PAID" />
-                              {purchase.payment_received_at && (
-                                <div className="text-[10px] text-slate-400">
-                                  {formatShortDate(purchase.payment_received_at)}
-                                </div>
+                            <div>
+                              <span className="font-black text-slate-900 text-sm block">
+                                {formatINR(balDue)}
+                              </span>
+                              {paidAmt > 0 && (
+                                <span className="text-[10px] text-emerald-700 font-bold">
+                                  Paid: {formatINR(paidAmt)}
+                                </span>
                               )}
                             </div>
+                          ) : (
+                            <span className="text-emerald-700 font-bold text-xs">✓ Settled</span>
                           )}
                         </td>
+                        <td className="py-4 px-4 whitespace-nowrap">
+                          <PaymentStatusBadge status={purchase.payment_status} />
+                        </td>
                         <td className="py-4 px-6 text-right no-print">
-                          <div className="flex items-center justify-end gap-2">
+                          <div className="flex items-center justify-end gap-1.5">
                             <Link
                               href={`/purchases/${purchase.id}`}
                               className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold"
@@ -558,6 +578,15 @@ export default function CustomerStatementDetailPage() {
                             >
                               <Eye className="w-3.5 h-3.5" />
                               <span>View</span>
+                            </Link>
+
+                            <Link
+                              href={`/purchases/${purchase.id}/edit`}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-semibold"
+                              title="Edit Bill Details"
+                            >
+                              <Edit2 className="w-3.5 h-3.5 text-slate-500" />
+                              <span>Edit</span>
                             </Link>
 
                             {isPending ? (
@@ -576,12 +605,14 @@ export default function CustomerStatementDetailPage() {
                                     setActivePaymentModal({
                                       purchaseId: purchase.id,
                                       amount: Number(purchase.amount_payable),
+                                      paidAmount: Number(purchase.paid_amount || 0),
+                                      balanceDue: purchase.balance_due,
                                     })
                                   }
                                   className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-sm"
                                 >
                                   <CheckCircle2 className="w-3.5 h-3.5" />
-                                  <span>Paid</span>
+                                  <span>Pay</span>
                                 </button>
                               </>
                             ) : (
@@ -606,8 +637,10 @@ export default function CustomerStatementDetailPage() {
             {/* Mobile Cards */}
             <div className="md:hidden divide-y divide-slate-100">
               {filteredPurchases.map((purchase) => {
-                const isPending = purchase.payment_status === 'PENDING';
+                const isPending = purchase.payment_status === 'PENDING' || purchase.payment_status === 'PARTIAL';
                 const pendingAge = getPendingAgeText(purchase.purchase_date);
+                const paidAmt = Number(purchase.paid_amount || 0);
+                const balDue = purchase.balance_due !== undefined ? purchase.balance_due : (isPending ? Number(purchase.amount_payable) : 0);
 
                 return (
                   <div key={purchase.id} className="p-4 space-y-3 bg-white">
@@ -639,11 +672,16 @@ export default function CustomerStatementDetailPage() {
                     <div className="flex items-center justify-between pt-1">
                       <div>
                         <span className="text-[10px] text-slate-400 uppercase font-semibold block">
-                          Net Amount Payable
+                          {isPending ? 'Balance Due' : 'Net Settled'}
                         </span>
-                        <span className="text-lg font-black text-slate-900">
-                          {formatINR(purchase.amount_payable)}
+                        <span className={`text-lg font-black ${isPending ? 'text-rose-700' : 'text-slate-900'}`}>
+                          {formatINR(isPending ? balDue : purchase.amount_payable)}
                         </span>
+                        {paidAmt > 0 && isPending && (
+                          <span className="text-[10px] text-emerald-700 font-semibold block">
+                            (Paid: {formatINR(paidAmt)})
+                          </span>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-1.5 flex-wrap justify-end no-print">
@@ -652,6 +690,13 @@ export default function CustomerStatementDetailPage() {
                           className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold"
                         >
                           View
+                        </Link>
+
+                        <Link
+                          href={`/purchases/${purchase.id}/edit`}
+                          className="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-semibold"
+                        >
+                          Edit
                         </Link>
 
                         {isPending ? (
@@ -669,11 +714,13 @@ export default function CustomerStatementDetailPage() {
                                 setActivePaymentModal({
                                   purchaseId: purchase.id,
                                   amount: Number(purchase.amount_payable),
+                                  paidAmount: Number(purchase.paid_amount || 0),
+                                  balanceDue: purchase.balance_due,
                                 })
                               }
                               className="px-2.5 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold shadow-sm"
                             >
-                              Paid
+                              Pay
                             </button>
                           </>
                         ) : (
@@ -777,6 +824,8 @@ export default function CustomerStatementDetailPage() {
           customerName={statement.customer.name}
           whatsappNumber={statement.customer.whatsapp_number}
           amountPayable={activePaymentModal.amount}
+          paidAmount={activePaymentModal.paidAmount || 0}
+          balanceDue={activePaymentModal.balanceDue}
           pharmacyName={pharmacyName}
           isProcessing={isProcessingPayment}
           errorMessage={paymentModalError}

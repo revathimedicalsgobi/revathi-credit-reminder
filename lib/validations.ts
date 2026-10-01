@@ -49,6 +49,22 @@ export const CreatePurchaseSchema = z.object({
   send_whatsapp: z.boolean().optional().default(true),
 });
 
+export const UpdatePurchaseSchema = z.object({
+  customer_name: z.string().min(1, 'Customer name is required').trim(),
+  whatsapp_number: z.string().refine(isValidWhatsAppNumber, {
+    message: 'Please provide a valid 10-digit WhatsApp number (e.g. 9876543210 or +919876543210)',
+  }),
+  purchase_date: z.string().optional(),
+  items: z.array(PurchaseItemSchema).min(1, 'At least one purchase item is required'),
+  send_whatsapp: z.boolean().optional().default(false),
+});
+
+export const RecordPaymentSchema = z.object({
+  amount: z.number().gt(0, 'Payment amount must be greater than 0').optional(),
+  payment_mode: z.enum(['CASH', 'UPI', 'GPAY', 'PHONEPE', 'PAYTM', 'CARD', 'NETBANKING', 'OTHER']).optional().default('CASH'),
+  notes: z.string().trim().max(500).optional().nullable(),
+});
+
 export const PharmacySettingsSchema = z.object({
   pharmacy_name: z.string().min(1, 'Pharmacy name is required').trim(),
   display_name: z.string().min(1, 'Display name is required').trim(),

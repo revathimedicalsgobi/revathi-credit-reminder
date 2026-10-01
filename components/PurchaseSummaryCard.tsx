@@ -34,6 +34,8 @@ interface PurchaseSummaryCardProps {
   totalDiscount: number;
   roundOff?: number;
   amountPayable: number;
+  paidAmount?: number;
+  balanceDue?: number;
   paymentStatus: PaymentStatus;
   upiId?: string | null;
   paymentQrUrl?: string | null;
@@ -59,6 +61,8 @@ export function PurchaseSummaryCard({
   totalDiscount,
   roundOff = 0,
   amountPayable,
+  paidAmount = 0,
+  balanceDue,
   paymentStatus,
   upiId,
   paymentQrUrl,
@@ -109,6 +113,8 @@ export function PurchaseSummaryCard({
       totalDiscount,
       roundOff,
       amountPayable,
+      paidAmount,
+      balanceDue: balanceDue !== undefined ? balanceDue : Math.max(0, amountPayable - paidAmount),
       pharmacyName,
       upiId,
       previousBalance,
@@ -313,8 +319,25 @@ export function PurchaseSummaryCard({
           )}
         </div>
 
-        {/* BOX SHAPE FOR GRAND TOTAL & CUMULATIVE CREDIT (As requested) */}
+        {/* BOX SHAPE FOR GRAND TOTAL & CUMULATIVE CREDIT */}
         <div className="px-6 py-5 bg-white border-t border-slate-200 space-y-3">
+          {paidAmount > 0 && (
+            <div className="p-3.5 bg-orange-50 border border-orange-200 rounded-2xl space-y-1.5 text-xs">
+              <div className="flex items-center justify-between text-slate-700">
+                <span>Total Bill Amount:</span>
+                <span className="font-bold">{formatINR(amountPayable)}</span>
+              </div>
+              <div className="flex items-center justify-between text-emerald-800 font-bold">
+                <span>✓ Paid Amount:</span>
+                <span>-{formatINR(paidAmount)}</span>
+              </div>
+              <div className="flex items-center justify-between text-orange-950 font-black pt-1 border-t border-orange-200">
+                <span>Remaining Bill Balance:</span>
+                <span>{formatINR(balanceDue !== undefined ? balanceDue : Math.max(0, amountPayable - paidAmount))}</span>
+              </div>
+            </div>
+          )}
+
           {previousBalance > 0 && (
             <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl space-y-2">
               <div className="flex items-center justify-between text-xs font-bold text-rose-900">
@@ -322,21 +345,21 @@ export function PurchaseSummaryCard({
                 <span>{formatINR(previousBalance)}</span>
               </div>
               <div className="flex items-center justify-between text-xs text-slate-700">
-                <span>➕ Current Purchase Bill:</span>
-                <span className="font-bold">{formatINR(amountPayable)}</span>
+                <span>➕ Current Purchase {paidAmount > 0 ? 'Pending Balance' : 'Bill'}:</span>
+                <span className="font-bold">{formatINR(balanceDue !== undefined ? balanceDue : Math.max(0, amountPayable - paidAmount))}</span>
               </div>
             </div>
           )}
 
-          <div className={`border-3 ${previousBalance > 0 ? 'border-rose-600 bg-gradient-to-br from-rose-50 via-amber-50/50 to-rose-100/70' : 'border-emerald-600 bg-gradient-to-br from-emerald-50 via-teal-50/60 to-emerald-100/70'} rounded-2xl p-5 text-center shadow-md`}>
-            <span className={`text-xs sm:text-sm font-black uppercase tracking-widest ${previousBalance > 0 ? 'text-rose-900' : 'text-emerald-900'} block`}>
-              {previousBalance > 0 ? 'TOTAL CUMULATIVE AMOUNT DUE' : 'GRAND TOTAL'}
+          <div className={`border-3 ${previousBalance > 0 ? 'border-rose-600 bg-gradient-to-br from-rose-50 via-amber-50/50 to-rose-100/70' : paidAmount > 0 ? 'border-orange-500 bg-gradient-to-br from-orange-50 via-amber-50/60 to-orange-100/70' : 'border-emerald-600 bg-gradient-to-br from-emerald-50 via-teal-50/60 to-emerald-100/70'} rounded-2xl p-5 text-center shadow-md`}>
+            <span className={`text-xs sm:text-sm font-black uppercase tracking-widest ${previousBalance > 0 ? 'text-rose-900' : paidAmount > 0 ? 'text-orange-950' : 'text-emerald-900'} block`}>
+              {previousBalance > 0 ? 'TOTAL CUMULATIVE AMOUNT DUE' : paidAmount > 0 ? 'REMAINING BALANCE DUE' : 'GRAND TOTAL'}
             </span>
-            <div className={`text-3xl sm:text-4xl font-black ${previousBalance > 0 ? 'text-rose-700' : 'text-emerald-800'} tracking-tight my-1`}>
-              {formatINR(previousBalance > 0 ? (cumulativeTotal || (previousBalance + amountPayable)) : amountPayable)}
+            <div className={`text-3xl sm:text-4xl font-black ${previousBalance > 0 ? 'text-rose-700' : paidAmount > 0 ? 'text-orange-800' : 'text-emerald-800'} tracking-tight my-1`}>
+              {formatINR(previousBalance > 0 ? (cumulativeTotal || (previousBalance + (balanceDue !== undefined ? balanceDue : amountPayable))) : (balanceDue !== undefined && paidAmount > 0 ? balanceDue : amountPayable))}
             </div>
             <p className="text-xs sm:text-sm font-bold text-slate-700 italic">
-              {numberToIndianRupeeWords(previousBalance > 0 ? (cumulativeTotal || (previousBalance + amountPayable)) : amountPayable)}
+              {numberToIndianRupeeWords(previousBalance > 0 ? (cumulativeTotal || (previousBalance + (balanceDue !== undefined ? balanceDue : amountPayable))) : (balanceDue !== undefined && paidAmount > 0 ? balanceDue : amountPayable))}
             </p>
           </div>
         </div>

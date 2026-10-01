@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getWhatsAppProvider } from '@/lib/whatsapp';
+import { RecordPaymentSchema } from '@/lib/validations';
+import { roundToTwoDecimals } from '@/lib/calculations';
+import { enrichPurchaseWithPayments } from '@/lib/payment-helpers';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -12,11 +15,26 @@ export async function POST(
   try {
     const supabase = createAdminClient();
     const purchaseId = params.id;
+    const body = await request.json().catch(() => ({}));
 
-    // 1. Fetch current purchase
+    // 1. Validate payment input
+    const validationResult = RecordPaymentSchema.safeParse(body);
+    if (!validationResult.success) {
+      return NextResponse.json(
+        {
+          error: 'Validation failed',
+          details: validationResult.error.flatten().fieldErrors,
+        },
+        { status: 400 }
+      );
+    }
+
+    const { amount: inputAmount, payment_mode = 'CASH', notes = '' } = validationResult.data;
+
+    // 2. Fetch current purchase with audit logs
     const { data: purchase, error: fetchErr } = await supabase
       .from('purchases')
-      .select('*, customer:customers(*)')
+      .select('*, customer:customers(*), audit_logs(*)')
       .eq('id', purchaseId)
       .maybeSingle();
 
@@ -24,25 +42,50 @@ export async function POST(
       return NextResponse.json({ error: 'Purchase not found' }, { status: 404 });
     }
 
-    if (purchase.payment_status === 'PAID') {
+    const totalPayable = roundToTwoDecimals(Number(purchase.amount_payable) || 0);
+    const existingEnriched = enrichPurchaseWithPayments(purchase, purchase.audit_logs || []);
+    const previousPaid = existingEnriched.paid_amount || 0;
+    const remainingBefore = existingEnriched.balance_due !== undefined ? existingEnriched.balance_due : totalPayable;
+
+    if (remainingBefore <= 0 || purchase.payment_status === 'PAID') {
       return NextResponse.json(
-        { error: 'Payment is already marked as PAID' },
+        { error: 'This bill is already fully PAID' },
         { status: 400 }
       );
     }
 
+    // 3. Determine payment amount (default to full remaining balance if not specified)
+    const paymentAmount = roundToTwoDecimals(
+      inputAmount !== undefined && inputAmount > 0 ? Math.min(inputAmount, remainingBefore) : remainingBefore
+    );
+
+    if (paymentAmount <= 0) {
+      return NextResponse.json(
+        { error: 'Payment amount must be greater than 0' },
+        { status: 400 }
+      );
+    }
+
+    const newTotalPaid = roundToTwoDecimals(previousPaid + paymentAmount);
+    const newRemainingBalance = roundToTwoDecimals(Math.max(0, totalPayable - newTotalPaid));
+    const isFullyPaid = newRemainingBalance <= 0 || newTotalPaid >= totalPayable;
     const paymentTimestamp = new Date().toISOString();
 
-    // 2. Update payment status to PAID
-    const { data: updatedPurchase, error: updateErr } = await supabase
+    // 4. Update purchase status in database
+    // In DB, status is 'PAID' if fully paid, otherwise remains 'PENDING' (compatible with DB CHECK constraint)
+    const updatePayload: Record<string, unknown> = {
+      payment_status: isFullyPaid ? 'PAID' : 'PENDING',
+      updated_at: paymentTimestamp,
+    };
+
+    if (isFullyPaid) {
+      updatePayload.payment_received_at = paymentTimestamp;
+    }
+
+    const { error: updateErr } = await supabase
       .from('purchases')
-      .update({
-        payment_status: 'PAID',
-        payment_received_at: paymentTimestamp,
-      })
-      .eq('id', purchaseId)
-      .select('*, customer:customers(*)')
-      .single();
+      .update(updatePayload)
+      .eq('id', purchaseId);
 
     if (updateErr) {
       return NextResponse.json(
@@ -51,19 +94,30 @@ export async function POST(
       );
     }
 
-    // 3. Record Audit Log
+    // 5. Record structured Payment in Audit Logs
+    const paymentData = {
+      type: 'PAYMENT',
+      amount: paymentAmount,
+      payment_mode: payment_mode,
+      notes: notes || (isFullyPaid ? 'Full payment received' : `Partial payment of ₹${paymentAmount}`),
+      previous_paid: previousPaid,
+      new_total_paid: newTotalPaid,
+      remaining_balance: newRemainingBalance,
+      paid_at: paymentTimestamp,
+    };
+
     await supabase.from('audit_logs').insert({
       purchase_id: purchaseId,
-      previous_status: 'PENDING',
-      new_status: 'PAID',
-      notes: 'Payment confirmed by staff via Payment Received action',
+      previous_status: existingEnriched.payment_status,
+      new_status: isFullyPaid ? 'PAID' : 'PARTIAL_PAYMENT',
+      notes: JSON.stringify(paymentData),
     });
 
-    // 4. Fetch Pharmacy Settings
+    // 6. Fetch Pharmacy Settings
     const { data: settings } = await supabase.from('settings').select('*').limit(1).maybeSingle();
     const pharmacyName = settings?.pharmacy_name || 'Revathi Medicals & Distributors';
 
-    // 5. Trigger Thank-You WhatsApp Message
+    // 7. Trigger WhatsApp Receipt / Thank-You
     let whatsappResult = null;
     try {
       const whatsappProvider = getWhatsAppProvider();
@@ -71,7 +125,10 @@ export async function POST(
         customerName: purchase.customer?.name || 'Customer',
         recipientPhone: purchase.customer?.whatsapp_number || '',
         purchaseId: purchase.id,
-        amountReceived: Number(purchase.amount_payable),
+        amountReceived: paymentAmount,
+        totalBillAmount: totalPayable,
+        remainingBalance: newRemainingBalance,
+        isPartial: !isFullyPaid,
         pharmacyName,
         paymentReceivedAt: paymentTimestamp,
       });
@@ -86,20 +143,33 @@ export async function POST(
         error_message: whatsappResult.error || null,
       });
     } catch (msgErr: unknown) {
-      // Non-blocking: Payment stays PAID even if WhatsApp dispatch encounters an issue
       console.error('WhatsApp thank-you dispatch exception:', msgErr);
       whatsappResult = {
         success: false,
         recipient: purchase.customer?.whatsapp_number || '',
-        error: msgErr instanceof Error ? msgErr.message : 'Failed to send WhatsApp thank-you message',
+        error: msgErr instanceof Error ? msgErr.message : 'Failed to send WhatsApp message',
       };
     }
 
+    // 8. Fetch updated purchase and enrich
+    const { data: finalPurchase } = await supabase
+      .from('purchases')
+      .select('*, customer:customers(*), items:purchase_items(*), audit_logs(*), reminder_logs(*)')
+      .eq('id', purchaseId)
+      .single();
+
+    const enrichedFinal = finalPurchase ? enrichPurchaseWithPayments(finalPurchase, finalPurchase.audit_logs || []) : null;
+
     return NextResponse.json({
       success: true,
-      purchase: updatedPurchase,
+      message: isFullyPaid
+        ? 'Payment received and bill marked as fully PAID!'
+        : `Partial payment of ₹${paymentAmount} recorded. Remaining balance: ₹${newRemainingBalance}`,
+      purchase: enrichedFinal,
+      paymentAmount,
+      remainingBalance: newRemainingBalance,
+      isFullyPaid,
       whatsapp: whatsappResult,
-      message: 'Payment received successfully',
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Failed to process payment receipt';

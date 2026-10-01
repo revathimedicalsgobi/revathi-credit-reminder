@@ -16,8 +16,9 @@ import {
   AlertTriangle,
   ArrowUpDown,
   MessageCircle,
+  Edit2,
 } from 'lucide-react';
-import { Purchase, DashboardStats } from '@/lib/types';
+import { Purchase, DashboardStats, PaymentMode } from '@/lib/types';
 import { formatINR } from '@/lib/calculations';
 import { getPendingAgeText, getPendingDaysCount, formatShortDate, maskWhatsAppNumber } from '@/lib/utils';
 import { PaymentStatusBadge } from '@/components/StatusBadge';
@@ -46,6 +47,8 @@ export default function DashboardPage() {
     customerName: string;
     whatsappNumber: string;
     amount: number;
+    paidAmount?: number;
+    balanceDue?: number;
   } | null>(null);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [paymentModalError, setPaymentModalError] = useState<string | null>(null);
@@ -95,12 +98,16 @@ export default function DashboardPage() {
   const handleSendManualReminder = (purchase: Purchase) => {
     const phone = purchase.customer?.whatsapp_number || '';
     const pendingDays = getPendingDaysCount(purchase.purchase_date);
+    const balanceDue = purchase.balance_due !== undefined ? purchase.balance_due : Number(purchase.amount_payable);
+
     const reminderText = buildWhatsAppReminderText({
       customerName: purchase.customer?.name || 'Customer',
       recipientPhone: phone,
       purchaseDate: purchase.purchase_date,
       pendingDays,
-      amountPending: Number(purchase.amount_payable),
+      amountPending: balanceDue,
+      totalBillAmount: Number(purchase.amount_payable),
+      paidAmount: Number(purchase.paid_amount || 0),
       pharmacyName,
       upiId,
     });
@@ -114,7 +121,10 @@ export default function DashboardPage() {
     const thankYouText = buildWhatsAppThankYouText({
       customerName: purchase.customer?.name || 'Customer',
       recipientPhone: phone,
-      amountReceived: Number(purchase.amount_payable),
+      amountReceived: Number(purchase.paid_amount || purchase.amount_payable),
+      totalBillAmount: Number(purchase.amount_payable),
+      remainingBalance: purchase.balance_due,
+      isPartial: purchase.payment_status === 'PARTIAL',
       pharmacyName,
     });
 
@@ -134,44 +144,29 @@ export default function DashboardPage() {
       customerName: purchase.customer?.name || 'Customer',
       whatsappNumber: purchase.customer?.whatsapp_number || '',
       amount: Number(purchase.amount_payable),
+      paidAmount: Number(purchase.paid_amount || 0),
+      balanceDue: purchase.balance_due,
     });
   };
 
-  const handleConfirmPaymentReceived = async () => {
+  const handleConfirmPaymentReceived = async (paymentData: { amount: number; payment_mode: PaymentMode; notes?: string }) => {
     if (!activePaymentModal) return;
     setIsProcessingPayment(true);
     setPaymentModalError(null);
 
     const targetId = activePaymentModal.purchaseId;
-    const targetAmount = activePaymentModal.amount;
 
     try {
       const res = await fetch(`/api/purchases/${targetId}/payment-received`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(paymentData),
       });
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data?.error || 'Failed to mark payment as received');
+        throw new Error(data?.error || 'Failed to record payment');
       }
-
-      // Optimistic update of local purchases list
-      setPurchases((prev) =>
-        prev.map((p) =>
-          p.id === targetId
-            ? { ...p, payment_status: 'PAID', payment_received_at: new Date().toISOString() }
-            : p
-        )
-      );
-
-      // Optimistic update of stats
-      setStats((prev) => ({
-        ...prev,
-        pending_customers_count: Math.max(0, prev.pending_customers_count - 1),
-        pending_amount: Math.max(0, prev.pending_amount - targetAmount),
-        payments_received_today_count: prev.payments_received_today_count + 1,
-        payments_received_today_amount: prev.payments_received_today_amount + targetAmount,
-      }));
 
       setActivePaymentModal(null);
       await fetchData();
@@ -199,7 +194,7 @@ export default function DashboardPage() {
             Dashboard
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-            Monitor customer purchases, pending payments, and automated WhatsApp follow-ups.
+            Monitor customer purchases, pending & partial payments, and automated WhatsApp follow-ups.
           </p>
         </div>
 
@@ -255,7 +250,7 @@ export default function DashboardPage() {
             <div className="text-2xl sm:text-3xl font-black text-amber-600">
               {stats.pending_customers_count}
             </div>
-            <p className="text-[11px] text-slate-400 mt-0.5">Awaiting payment</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">Awaiting balance</p>
           </div>
         </div>
 
@@ -290,7 +285,7 @@ export default function DashboardPage() {
               {formatINR(stats.payments_received_today_amount)}
             </div>
             <p className="text-[11px] text-emerald-700/70 mt-0.5 font-medium">
-              {stats.payments_received_today_count} payments marked paid
+              {stats.payments_received_today_count} payments collected
             </p>
           </div>
         </div>
@@ -309,7 +304,7 @@ export default function DashboardPage() {
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Pending Payments
+              Pending & Partial
             </button>
             <button
               onClick={() => setStatusFilter('PAID')}
@@ -393,16 +388,18 @@ export default function DashboardPage() {
                     <th className="py-3.5 px-6">Customer</th>
                     <th className="py-3.5 px-4">WhatsApp</th>
                     <th className="py-3.5 px-4">Purchase Date</th>
-                    <th className="py-3.5 px-4">Amount</th>
-                    <th className="py-3.5 px-4">Pending Age</th>
+                    <th className="py-3.5 px-4">Bill Amount</th>
+                    <th className="py-3.5 px-4">Pending Due</th>
                     <th className="py-3.5 px-4">Status</th>
                     <th className="py-3.5 px-6 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {sortedPurchases.map((purchase) => {
-                    const isPending = purchase.payment_status === 'PENDING';
+                    const isPending = purchase.payment_status === 'PENDING' || purchase.payment_status === 'PARTIAL';
                     const pendingAge = getPendingAgeText(purchase.purchase_date);
+                    const paidAmt = Number(purchase.paid_amount || 0);
+                    const balDue = purchase.balance_due !== undefined ? purchase.balance_due : (isPending ? Number(purchase.amount_payable) : 0);
 
                     return (
                       <tr
@@ -428,38 +425,58 @@ export default function DashboardPage() {
                         <td className="py-4 px-4 text-xs text-slate-600">
                           {formatShortDate(purchase.purchase_date)}
                         </td>
-                        <td className="py-4 px-4 font-bold text-slate-900 whitespace-nowrap">
+                        <td className="py-4 px-4 text-xs font-semibold text-slate-700 whitespace-nowrap">
                           {formatINR(purchase.amount_payable)}
                         </td>
                         <td className="py-4 px-4 text-xs">
                           {isPending ? (
-                            <span className="font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
-                              {pendingAge}
-                            </span>
+                            <div>
+                              <span className="font-bold text-slate-900 text-sm block">
+                                {formatINR(balDue)}
+                              </span>
+                              {paidAmt > 0 ? (
+                                <span className="text-[10px] text-emerald-700 font-bold">
+                                  Paid: {formatINR(paidAmt)}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-amber-700 font-semibold">
+                                  {pendingAge}
+                                </span>
+                              )}
+                            </div>
                           ) : (
-                            <span className="text-slate-400">—</span>
+                            <span className="text-emerald-700 font-bold text-xs">✓ Settled</span>
                           )}
                         </td>
                         <td className="py-4 px-4">
                           <PaymentStatusBadge status={purchase.payment_status} />
                         </td>
                         <td className="py-4 px-6 text-right">
-                          <div className="flex items-center justify-end gap-2">
+                          <div className="flex items-center justify-end gap-1.5">
                             <Link
                               href={`/purchases/${purchase.id}`}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition-colors"
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition-colors"
                               title="View Purchase Summary"
                             >
                               <Eye className="w-3.5 h-3.5" />
                               <span>View</span>
                             </Link>
 
+                            <Link
+                              href={`/purchases/${purchase.id}/edit`}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-semibold transition-colors"
+                              title="Edit Bill Details"
+                            >
+                              <Edit2 className="w-3.5 h-3.5 text-slate-500" />
+                              <span>Edit</span>
+                            </Link>
+
                             {isPending ? (
                               <>
                                 <button
                                   onClick={() => handleSendManualReminder(purchase)}
-                                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold transition-all shadow-2xs"
-                                  title="Open WhatsApp Web chat with reminder preloaded"
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold transition-all"
+                                  title="Open WhatsApp Web chat with reminder"
                                 >
                                   <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
                                   <span>Reminder</span>
@@ -470,13 +487,13 @@ export default function DashboardPage() {
                                   className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-lg text-xs font-bold shadow-sm transition-all"
                                 >
                                   <CheckCircle2 className="w-3.5 h-3.5" />
-                                  <span>Payment Received</span>
+                                  <span>Pay</span>
                                 </button>
                               </>
                             ) : (
                               <button
                                 onClick={() => handleSendManualThankYou(purchase)}
-                                className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold transition-all shadow-2xs"
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold transition-all"
                                 title="Open WhatsApp Web chat with Thank-You message"
                               >
                                 <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
@@ -494,8 +511,10 @@ export default function DashboardPage() {
 
             <div className="md:hidden divide-y divide-slate-100">
               {sortedPurchases.map((purchase) => {
-                const isPending = purchase.payment_status === 'PENDING';
+                const isPending = purchase.payment_status === 'PENDING' || purchase.payment_status === 'PARTIAL';
                 const pendingAge = getPendingAgeText(purchase.purchase_date);
+                const paidAmt = Number(purchase.paid_amount || 0);
+                const balDue = purchase.balance_due !== undefined ? purchase.balance_due : (isPending ? Number(purchase.amount_payable) : 0);
 
                 return (
                   <div key={purchase.id} className="p-4 space-y-3 bg-white">
@@ -528,7 +547,7 @@ export default function DashboardPage() {
                       </div>
                       {isPending && (
                         <div className="font-bold text-amber-700">
-                          {pendingAge}
+                          {paidAmt > 0 ? `Paid: ${formatINR(paidAmt)}` : pendingAge}
                         </div>
                       )}
                     </div>
@@ -536,10 +555,10 @@ export default function DashboardPage() {
                     <div className="flex items-center justify-between pt-1">
                       <div>
                         <span className="text-[11px] text-slate-400 uppercase font-semibold block">
-                          Amount Payable
+                          {isPending ? 'Balance Due' : 'Amount Settled'}
                         </span>
-                        <span className="text-lg font-extrabold text-slate-900">
-                          {formatINR(purchase.amount_payable)}
+                        <span className={`text-lg font-extrabold ${isPending ? 'text-rose-700' : 'text-slate-900'}`}>
+                          {formatINR(isPending ? balDue : purchase.amount_payable)}
                         </span>
                       </div>
 
@@ -549,6 +568,13 @@ export default function DashboardPage() {
                           className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold"
                         >
                           View
+                        </Link>
+
+                        <Link
+                          href={`/purchases/${purchase.id}/edit`}
+                          className="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-semibold"
+                        >
+                          Edit
                         </Link>
 
                         {isPending ? (
@@ -566,7 +592,7 @@ export default function DashboardPage() {
                               onClick={() => handleOpenPaymentModal(purchase)}
                               className="px-2.5 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold shadow-sm"
                             >
-                              Paid
+                              Pay
                             </button>
                           </>
                         ) : (
@@ -597,6 +623,8 @@ export default function DashboardPage() {
           customerName={activePaymentModal.customerName}
           whatsappNumber={activePaymentModal.whatsappNumber}
           amountPayable={activePaymentModal.amount}
+          paidAmount={activePaymentModal.paidAmount || 0}
+          balanceDue={activePaymentModal.balanceDue}
           pharmacyName={pharmacyName}
           isProcessing={isProcessingPayment}
           errorMessage={paymentModalError}

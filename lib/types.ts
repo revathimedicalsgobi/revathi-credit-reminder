@@ -1,4 +1,5 @@
-export type PaymentStatus = 'PENDING' | 'PAID';
+export type PaymentStatus = 'PENDING' | 'PARTIAL' | 'PAID';
+export type PaymentMode = 'CASH' | 'UPI' | 'GPAY' | 'PHONEPE' | 'PAYTM' | 'CARD' | 'NETBANKING' | 'OTHER';
 export type WhatsAppStatus = 'PENDING' | 'SENT' | 'FAILED';
 export type ReminderStatus = 'SENT' | 'FAILED' | 'DELIVERED' | 'READ';
 export type MessageType = 'PURCHASE_SUMMARY' | 'PAYMENT_REMINDER' | 'PAYMENT_RECEIVED';
@@ -23,6 +24,16 @@ export interface PurchaseItem {
   created_at?: string;
 }
 
+export interface PaymentRecord {
+  id: string;
+  purchase_id: string;
+  amount: number;
+  payment_mode?: PaymentMode | string;
+  notes?: string | null;
+  paid_at: string;
+  created_at?: string;
+}
+
 export interface ReminderLog {
   id: string;
   purchase_id: string;
@@ -42,6 +53,8 @@ export interface Purchase {
   gross_total: number;
   total_discount: number;
   amount_payable: number;
+  paid_amount?: number;
+  balance_due?: number;
   payment_status: PaymentStatus;
   payment_received_at?: string | null;
   whatsapp_status: WhatsAppStatus;
@@ -51,6 +64,7 @@ export interface Purchase {
   updated_at: string;
   customer?: Customer;
   items?: PurchaseItem[];
+  payments?: PaymentRecord[];
   reminder_logs?: ReminderLog[];
 }
 
@@ -88,6 +102,14 @@ export interface PurchaseInputItem {
 export interface CreatePurchaseInput {
   customer_name: string;
   whatsapp_number: string;
+  items: PurchaseInputItem[];
+  send_whatsapp?: boolean;
+}
+
+export interface UpdatePurchaseInput {
+  customer_name: string;
+  whatsapp_number: string;
+  purchase_date?: string;
   items: PurchaseInputItem[];
   send_whatsapp?: boolean;
 }

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { normalizeWhatsAppNumber } from '@/lib/validations';
+import { computePurchasePaymentDetails } from '@/lib/payment-helpers';
+import { roundToTwoDecimals } from '@/lib/calculations';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -24,12 +26,13 @@ export async function GET(
       return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
     }
 
-    // 2. Fetch all purchases with items for this customer
+    // 2. Fetch all purchases with items, audit_logs, and reminder_logs
     const { data: purchases, error: purchErr } = await supabase
       .from('purchases')
       .select(`
         *,
         items:purchase_items(*),
+        audit_logs(*),
         reminder_logs(*)
       `)
       .eq('customer_id', customerId)
@@ -39,7 +42,7 @@ export async function GET(
       return NextResponse.json({ error: purchErr.message }, { status: 500 });
     }
 
-    // 3. Compute ledger statement aggregates
+    // 3. Compute ledger statement aggregates with partial payments
     let totalGross = 0;
     let totalDiscount = 0;
     let totalBilled = 0;
@@ -48,9 +51,8 @@ export async function GET(
     let pendingBillsCount = 0;
     let settledBillsCount = 0;
 
-    const purchaseList = purchases || [];
-
-    for (const p of purchaseList) {
+    const enrichedPurchases = (purchases || []).map((p) => {
+      const details = computePurchasePaymentDetails(p, p.audit_logs || []);
       const gross = Number(p.gross_total) || 0;
       const disc = Number(p.total_discount) || 0;
       const payable = Number(p.amount_payable) || 0;
@@ -58,30 +60,38 @@ export async function GET(
       totalGross += gross;
       totalDiscount += disc;
       totalBilled += payable;
+      totalPaid += details.paid_amount;
+      outstandingBalance += details.balance_due;
 
-      if (p.payment_status === 'PAID') {
-        totalPaid += payable;
+      if (details.balance_due === 0 || details.payment_status === 'PAID') {
         settledBillsCount += 1;
       } else {
-        outstandingBalance += payable;
         pendingBillsCount += 1;
       }
-    }
+
+      return {
+        ...p,
+        paid_amount: details.paid_amount,
+        balance_due: details.balance_due,
+        payment_status: details.payment_status,
+        payments: details.payments,
+      };
+    });
 
     const statement = {
       customer,
-      purchases: purchaseList,
+      purchases: enrichedPurchases,
       summary: {
-        total_purchases_count: purchaseList.length,
-        total_gross: Math.round(totalGross * 100) / 100,
-        total_discount: Math.round(totalDiscount * 100) / 100,
-        total_billed: Math.round(totalBilled * 100) / 100,
-        total_paid: Math.round(totalPaid * 100) / 100,
-        outstanding_balance: Math.round(outstandingBalance * 100) / 100,
+        total_purchases_count: enrichedPurchases.length,
+        total_gross: roundToTwoDecimals(totalGross),
+        total_discount: roundToTwoDecimals(totalDiscount),
+        total_billed: roundToTwoDecimals(totalBilled),
+        total_paid: roundToTwoDecimals(totalPaid),
+        outstanding_balance: roundToTwoDecimals(outstandingBalance),
         pending_bills_count: pendingBillsCount,
         settled_bills_count: settledBillsCount,
-        first_purchase_date: purchaseList.length > 0 ? purchaseList[purchaseList.length - 1].purchase_date : null,
-        latest_purchase_date: purchaseList.length > 0 ? purchaseList[0].purchase_date : null,
+        first_purchase_date: enrichedPurchases.length > 0 ? enrichedPurchases[enrichedPurchases.length - 1].purchase_date : null,
+        latest_purchase_date: enrichedPurchases.length > 0 ? enrichedPurchases[0].purchase_date : null,
       },
     };
 

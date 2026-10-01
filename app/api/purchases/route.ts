@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { CreatePurchaseSchema, normalizeWhatsAppNumber } from '@/lib/validations';
 import { calculatePurchaseSummary } from '@/lib/calculations';
+import { computePurchasePaymentDetails } from '@/lib/payment-helpers';
 import { getWhatsAppProvider } from '@/lib/whatsapp';
 
 export const dynamic = 'force-dynamic';
@@ -20,13 +21,16 @@ export async function GET(request: NextRequest) {
       .select(`
         *,
         customer:customers(*),
-        items:purchase_items(*)
+        items:purchase_items(*),
+        audit_logs(*)
       `)
       .order('purchase_date', { ascending: false })
       .limit(limit);
 
-    if (status && (status === 'PENDING' || status === 'PAID')) {
-      query = query.eq('payment_status', status);
+    if (status && status === 'PAID') {
+      query = query.eq('payment_status', 'PAID');
+    } else if (status && status === 'PENDING') {
+      query = query.eq('payment_status', 'PENDING');
     }
 
     const { data: purchases, error } = await query;
@@ -35,7 +39,30 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    let filtered = purchases || [];
+    // Enrich with computed partial payments
+    const enrichedPurchases = (purchases || []).map((p) => {
+      const { paid_amount, balance_due, payment_status, payments } = computePurchasePaymentDetails(p, p.audit_logs || []);
+      return {
+        ...p,
+        paid_amount,
+        balance_due,
+        payment_status,
+        payments,
+      };
+    });
+
+    let filtered = enrichedPurchases;
+
+    // Further status filtering if requested specifically for PARTIAL
+    if (status === 'PARTIAL') {
+      filtered = filtered.filter((p) => p.payment_status === 'PARTIAL');
+    } else if (status === 'PENDING') {
+      // Pending tab includes both fully pending and partially paid
+      filtered = filtered.filter((p) => p.payment_status === 'PENDING' || p.payment_status === 'PARTIAL');
+    } else if (status === 'PAID') {
+      filtered = filtered.filter((p) => p.payment_status === 'PAID');
+    }
+
     if (search) {
       const searchLower = search.toLowerCase();
       filtered = filtered.filter((p) => {

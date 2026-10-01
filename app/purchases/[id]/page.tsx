@@ -14,12 +14,18 @@ import {
   MessageSquare,
   MessageCircle,
   Sparkles,
+  Edit2,
+  CreditCard,
+  Clock,
+  Receipt,
+  Check,
 } from 'lucide-react';
-import { Purchase } from '@/lib/types';
+import { Purchase, PaymentMode } from '@/lib/types';
 import { formatINR } from '@/lib/calculations';
-import { getPendingAgeText, getPendingDaysCount, formatDisplayDate } from '@/lib/utils';
+import { getPendingAgeText, getPendingDaysCount, formatDisplayDate, formatShortDate } from '@/lib/utils';
 import { PurchaseSummaryCard } from '@/components/PurchaseSummaryCard';
 import { PaymentReceivedModal } from '@/components/PaymentReceivedModal';
+import { PaymentStatusBadge } from '@/components/StatusBadge';
 import {
   buildWhatsAppReminderText,
   buildWhatsAppThankYouText,
@@ -32,6 +38,7 @@ function PurchaseDetailContent() {
   const searchParams = useSearchParams();
   const purchaseId = params.id as string;
   const isJustCreated = searchParams.get('created') === 'true';
+  const isJustUpdated = searchParams.get('updated') === 'true';
 
   const [purchase, setPurchase] = useState<Purchase | null>(null);
   const [previousBalance, setPreviousBalance] = useState<number>(0);
@@ -47,7 +54,11 @@ function PurchaseDetailContent() {
 
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(
-    isJustCreated ? 'Purchase recorded successfully!' : null
+    isJustCreated
+      ? 'Purchase bill recorded successfully!'
+      : isJustUpdated
+      ? 'Purchase bill updated successfully!'
+      : null
   );
 
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -79,7 +90,7 @@ function PurchaseDetailContent() {
 
       setPurchase(data.purchase);
       setPreviousBalance(Number(data.previousBalance || 0));
-      setCumulativeTotal(Number(data.cumulativeTotal || (data.purchase?.amount_payable || 0)));
+      setCumulativeTotal(Number(data.cumulativeTotal || (data.purchase?.balance_due ?? data.purchase?.amount_payable ?? 0)));
       setDateWisePendingBills(data.dateWisePendingBills || []);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to load purchase details';
@@ -124,12 +135,16 @@ function PurchaseDetailContent() {
     if (!purchase) return;
     const phone = purchase.customer?.whatsapp_number || '';
     const pendingDays = getPendingDaysCount(purchase.purchase_date);
+    const balanceDue = purchase.balance_due !== undefined ? purchase.balance_due : Number(purchase.amount_payable);
+
     const reminderText = buildWhatsAppReminderText({
       customerName: purchase.customer?.name || 'Customer',
       recipientPhone: phone,
       purchaseDate: purchase.purchase_date,
       pendingDays,
-      amountPending: Number(purchase.amount_payable),
+      amountPending: balanceDue,
+      totalBillAmount: Number(purchase.amount_payable),
+      paidAmount: Number(purchase.paid_amount || 0),
       pharmacyName,
       upiId,
     });
@@ -144,7 +159,10 @@ function PurchaseDetailContent() {
     const thankYouText = buildWhatsAppThankYouText({
       customerName: purchase.customer?.name || 'Customer',
       recipientPhone: phone,
-      amountReceived: Number(purchase.amount_payable),
+      amountReceived: Number(purchase.paid_amount || purchase.amount_payable),
+      totalBillAmount: Number(purchase.amount_payable),
+      remainingBalance: purchase.balance_due,
+      isPartial: purchase.payment_status === 'PARTIAL',
       pharmacyName,
     });
 
@@ -169,6 +187,8 @@ function PurchaseDetailContent() {
       grossTotal: Number(purchase.gross_total) || 0,
       totalDiscount: Number(purchase.total_discount) || 0,
       amountPayable: Number(purchase.amount_payable) || 0,
+      paidAmount: Number(purchase.paid_amount || 0),
+      balanceDue: purchase.balance_due,
       pharmacyName,
       upiId,
       previousBalance,
@@ -180,34 +200,25 @@ function PurchaseDetailContent() {
     window.open(chatUrl, '_blank', 'noopener,noreferrer');
   };
 
-  const handleConfirmPayment = async () => {
+  const handleConfirmPayment = async (paymentData: { amount: number; payment_mode: PaymentMode; notes?: string }) => {
     setIsProcessingPayment(true);
     setPaymentModalError(null);
 
     try {
       const res = await fetch(`/api/purchases/${purchaseId}/payment-received`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(paymentData),
       });
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data?.error || 'Failed to mark payment received');
+        throw new Error(data?.error || 'Failed to process payment');
       }
 
-      // Optimistic update
-      setPurchase((prev) =>
-        prev
-          ? {
-              ...prev,
-              payment_status: 'PAID',
-              payment_received_at: new Date().toISOString(),
-            }
-          : null
-      );
-
       setShowPaymentModal(false);
-      setActionSuccessMsg('Payment marked as PAID successfully!');
-      fetchPurchase();
+      setActionSuccessMsg(data.message || 'Payment recorded successfully!');
+      await fetchPurchase();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to process payment';
       setPaymentModalError(msg);
@@ -245,8 +256,13 @@ function PurchaseDetailContent() {
     );
   }
 
-  const isPending = purchase.payment_status === 'PENDING';
+  const isPending = purchase.payment_status === 'PENDING' || purchase.payment_status === 'PARTIAL';
+  const isFullyPaid = purchase.payment_status === 'PAID';
   const pendingAge = getPendingAgeText(purchase.purchase_date);
+  const paidAmount = Number(purchase.paid_amount || 0);
+  const balanceDue = purchase.balance_due !== undefined ? purchase.balance_due : (isFullyPaid ? 0 : Number(purchase.amount_payable));
+  const totalAmount = Number(purchase.amount_payable || 0);
+  const paidPercentage = totalAmount > 0 ? Math.min(100, Math.round((paidAmount / totalAmount) * 100)) : 100;
 
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
@@ -261,8 +277,9 @@ function PurchaseDetailContent() {
             <ArrowLeft className="w-4 h-4" />
           </Link>
           <div>
-            <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-              Purchase for {purchase.customer?.name}
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2 flex-wrap">
+              <span>Purchase for {purchase.customer?.name}</span>
+              <PaymentStatusBadge status={purchase.payment_status} />
             </h1>
             <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-2">
               <Calendar className="w-3.5 h-3.5" />
@@ -273,6 +290,16 @@ function PurchaseDetailContent() {
 
         {/* Header Action Buttons */}
         <div className="flex items-center flex-wrap gap-2.5">
+          {/* Edit Bill Button */}
+          <Link
+            href={`/purchases/${purchase.id}/edit`}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-slate-800 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl shadow-xs transition-all"
+            title="Edit Customer, Items, MRP, or Discount on this Bill"
+          >
+            <Edit2 className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Edit Bill</span>
+          </Link>
+
           <button
             onClick={() => window.print()}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl shadow-sm transition-all"
@@ -332,7 +359,7 @@ function PurchaseDetailContent() {
               className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-xl shadow-md shadow-emerald-600/30 transition-all transform hover:-translate-y-0.5"
             >
               <CheckCircle2 className="w-4 h-4" />
-              <span>Payment Received</span>
+              <span>{paidAmount > 0 ? 'Receive Balance Payment' : 'Payment Received'}</span>
             </button>
           ) : (
             <span className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-800 bg-emerald-100 rounded-xl border border-emerald-200">
@@ -345,7 +372,7 @@ function PurchaseDetailContent() {
 
       {/* Success / Alert notification */}
       {actionSuccessMsg && (
-        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-800 text-xs flex items-center justify-between no-print">
+        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-800 text-xs flex items-center justify-between no-print animate-in fade-in">
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-emerald-600 flex-shrink-0" />
             <span className="font-semibold">{actionSuccessMsg}</span>
@@ -359,7 +386,7 @@ function PurchaseDetailContent() {
         </div>
       )}
 
-      {/* Grid: Purchase Summary Card on left, Status & Reminder Logs on right */}
+      {/* Grid: Purchase Summary Card on left, Status & Payment History on right */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         {/* Left Column: Purchase Summary Card */}
         <div className="lg:col-span-7">
@@ -388,6 +415,8 @@ function PurchaseDetailContent() {
             grossTotal={Number(purchase.gross_total)}
             totalDiscount={Number(purchase.total_discount)}
             amountPayable={Number(purchase.amount_payable)}
+            paidAmount={paidAmount}
+            balanceDue={balanceDue}
             paymentStatus={purchase.payment_status}
             previousBalance={previousBalance}
             cumulativeTotal={cumulativeTotal}
@@ -398,51 +427,122 @@ function PurchaseDetailContent() {
           />
         </div>
 
-        {/* Right Column: Status Details & Reminder History */}
+        {/* Right Column: Payment Progress, Payment History & Message Logs */}
         <div className="lg:col-span-5 space-y-6 no-print">
-          {/* Status Overview Card */}
+          {/* Payment Status & Progress Card */}
           <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-              Payment Status Overview
-            </h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                Payment Status & Breakdown
+              </h3>
+              <PaymentStatusBadge status={purchase.payment_status} />
+            </div>
 
-            <div className="space-y-3 text-sm">
-              <div className="flex justify-between items-center py-2 border-b border-slate-100">
-                <span className="text-slate-500">Status</span>
-                <span
-                  className={`font-bold ${
-                    isPending ? 'text-amber-600' : 'text-emerald-600'
+            {/* Visual Progress Bar */}
+            <div className="space-y-1.5">
+              <div className="flex justify-between text-xs font-bold">
+                <span className="text-emerald-700">Paid: {formatINR(paidAmount)} ({paidPercentage}%)</span>
+                <span className={balanceDue > 0 ? 'text-rose-700' : 'text-emerald-700'}>
+                  {balanceDue > 0 ? `Due: ${formatINR(balanceDue)}` : 'Settled'}
+                </span>
+              </div>
+              <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
+                <div
+                  className={`h-full transition-all duration-500 ${
+                    isFullyPaid ? 'bg-emerald-500' : paidAmount > 0 ? 'bg-orange-500' : 'bg-slate-300'
                   }`}
-                >
-                  {purchase.payment_status}
+                  style={{ width: `${paidPercentage}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2.5 text-xs pt-2 border-t border-slate-100">
+              <div className="flex justify-between items-center py-1">
+                <span className="text-slate-500">Total Bill Amount</span>
+                <span className="font-bold text-slate-900">{formatINR(totalAmount)}</span>
+              </div>
+
+              {paidAmount > 0 && (
+                <div className="flex justify-between items-center py-1 text-emerald-800">
+                  <span>Total Amount Paid</span>
+                  <span className="font-bold">{formatINR(paidAmount)}</span>
+                </div>
+              )}
+
+              <div className="flex justify-between items-center py-1 text-sm">
+                <span className="text-slate-600 font-semibold">Remaining Balance Due</span>
+                <span className={`font-black text-base ${balanceDue > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
+                  {formatINR(balanceDue)}
                 </span>
               </div>
 
               {isPending && (
-                <div className="flex justify-between items-center py-2 border-b border-slate-100">
+                <div className="flex justify-between items-center py-1">
                   <span className="text-slate-500">Pending Age</span>
-                  <span className="font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 text-xs">
+                  <span className="font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
                     {pendingAge}
                   </span>
                 </div>
               )}
 
-              {!isPending && purchase.payment_received_at && (
-                <div className="flex justify-between items-center py-2 border-b border-slate-100">
-                  <span className="text-slate-500">Payment Received</span>
-                  <span className="font-semibold text-slate-800 text-xs">
+              {isFullyPaid && purchase.payment_received_at && (
+                <div className="flex justify-between items-center py-1">
+                  <span className="text-slate-500">Fully Settled At</span>
+                  <span className="font-semibold text-slate-800">
                     {formatDisplayDate(purchase.payment_received_at)}
                   </span>
                 </div>
               )}
-
-              <div className="flex justify-between items-center py-2">
-                <span className="text-slate-500">Amount Payable</span>
-                <span className="text-lg font-black text-slate-900">
-                  {formatINR(purchase.amount_payable)}
-                </span>
-              </div>
             </div>
+
+            {isPending && (
+              <div className="pt-2">
+                <button
+                  onClick={() => setShowPaymentModal(true)}
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/20 transition-all flex items-center justify-center gap-1.5"
+                >
+                  <CreditCard className="w-4 h-4" />
+                  <span>+ Record Payment Entry</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Payment Transactions History */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+              <Receipt className="w-3.5 h-3.5 text-emerald-600" />
+              Payment History ({purchase.payments?.length || (isFullyPaid ? 1 : 0)})
+            </h3>
+
+            {(!purchase.payments || purchase.payments.length === 0) && !isFullyPaid ? (
+              <div className="text-center py-6 text-slate-400 text-xs italic">
+                No payment recorded yet for this bill.
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {(purchase.payments || []).map((pay, idx) => (
+                  <div
+                    key={pay.id || idx}
+                    className="p-3 bg-emerald-50/50 rounded-xl border border-emerald-100 text-xs space-y-1"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-black text-emerald-950 text-sm">
+                        {formatINR(pay.amount)}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                        {pay.payment_mode || 'CASH'}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between text-slate-500 text-[11px] pt-0.5">
+                      <span>{formatDisplayDate(pay.paid_at)}</span>
+                      {pay.notes && <span className="italic text-slate-600 truncate max-w-[180px]">{pay.notes}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Reminder & Message History */}
@@ -505,7 +605,7 @@ function PurchaseDetailContent() {
         </div>
       </div>
 
-      {/* Payment Received Modal */}
+      {/* Payment Received Modal (Supports Full and Partial Payments) */}
       {showPaymentModal && (
         <PaymentReceivedModal
           isOpen={true}
@@ -513,7 +613,9 @@ function PurchaseDetailContent() {
           onConfirm={handleConfirmPayment}
           customerName={purchase.customer?.name || 'Customer'}
           whatsappNumber={purchase.customer?.whatsapp_number || ''}
-          amountPayable={Number(purchase.amount_payable)}
+          amountPayable={totalAmount}
+          paidAmount={paidAmount}
+          balanceDue={balanceDue}
           pharmacyName={pharmacyName}
           isProcessing={isProcessingPayment}
           errorMessage={paymentModalError}
