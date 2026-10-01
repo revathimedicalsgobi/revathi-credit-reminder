@@ -1,14 +1,29 @@
 import { IWhatsAppProvider } from './types';
 import { MetaWhatsAppClient } from './meta-whatsapp-client';
 import { MockWhatsAppClient } from './mock-whatsapp-client';
+import { UltraMsgWhatsAppClient } from './ultramsg-client';
 
 let cachedProvider: IWhatsAppProvider | null = null;
 
 /**
- * Returns the active WhatsApp provider instance (Meta Cloud API if configured, otherwise Mock)
+ * Returns the active WhatsApp provider instance:
+ * 1. UltraMsg Gateway (if configured)
+ * 2. Meta WhatsApp Cloud API (if configured)
+ * 3. Mock WhatsApp Client (fallback)
  */
 export function getWhatsAppProvider(): IWhatsAppProvider {
   if (cachedProvider) {
+    return cachedProvider;
+  }
+
+  const ultramsgInstanceId = process.env.ULTRAMSG_INSTANCE_ID;
+  const ultramsgToken = process.env.ULTRAMSG_TOKEN;
+
+  if (ultramsgInstanceId && ultramsgToken) {
+    cachedProvider = new UltraMsgWhatsAppClient({
+      instanceId: ultramsgInstanceId,
+      token: ultramsgToken,
+    });
     return cachedProvider;
   }
 
@@ -34,3 +49,5 @@ export function getWhatsAppProvider(): IWhatsAppProvider {
 export * from './types';
 export * from './meta-whatsapp-client';
 export * from './mock-whatsapp-client';
+export * from './ultramsg-client';
+

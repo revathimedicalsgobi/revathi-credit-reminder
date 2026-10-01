@@ -105,6 +105,18 @@ export function Navbar() {
             </Link>
 
             <Link
+              href="/reminders/bulk"
+              className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-colors ${
+                pathname.startsWith('/reminders')
+                  ? 'bg-emerald-50 text-emerald-700 font-bold'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <ReceiptText className="w-4 h-4 text-emerald-600" />
+              <span>Bulk Reminders</span>
+            </Link>
+
+            <Link
               href="/settings"
               className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-colors ${
                 pathname === '/settings'
@@ -184,6 +196,19 @@ export function Navbar() {
             >
               <Users className="w-4 h-4 text-emerald-600" />
               <span>Customers Master & Statements</span>
+            </Link>
+
+            <Link
+              href="/reminders/bulk"
+              onClick={() => setIsMobileMenuOpen(false)}
+              className={`flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                pathname.startsWith('/reminders')
+                  ? 'bg-emerald-50 text-emerald-700'
+                  : 'text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <ReceiptText className="w-4 h-4 text-emerald-600" />
+              <span>Automated Bulk Reminders</span>
             </Link>
 
             <Link
