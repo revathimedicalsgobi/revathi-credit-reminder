@@ -20,14 +20,57 @@ import {
   Upload,
   Camera,
   Image as ImageIcon,
-  ExternalLink,
   ReceiptText,
   Eye,
   Check,
 } from 'lucide-react';
-import { StockRequest, StockRequestStatus } from '@/lib/types';
-import { formatShortDate, formatDisplayDate, maskWhatsAppNumber } from '@/lib/utils';
+import { StockRequest } from '@/lib/types';
+import { formatShortDate, maskWhatsAppNumber } from '@/lib/utils';
 import { buildWhatsAppStockArrivalText, getWhatsAppDirectUrl } from '@/lib/whatsapp-share';
+
+/**
+ * Client-side fast image compressor using Canvas
+ * Compresses any camera or gallery photo down to ~40-80 KB for instant uploads
+ */
+function compressImage(file: File, maxWidth = 800, quality = 0.75): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxWidth || height > maxWidth) {
+          if (width > height) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          } else {
+            width = Math.round((width * maxWidth) / height);
+            height = maxWidth;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(event.target?.result as string);
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+        resolve(compressedDataUrl);
+      };
+      img.onerror = () => reject(new Error('Failed to load image for compression'));
+    };
+    reader.onerror = () => reject(new Error('Failed to read file'));
+  });
+}
 
 export default function StockRequestsPage() {
   const [requests, setRequests] = useState<StockRequest[]>([]);
@@ -57,10 +100,11 @@ export default function StockRequestsPage() {
   const [formQuantity, setFormQuantity] = useState('1');
   const [formNotes, setFormNotes] = useState('');
   const [formImageData, setFormImageData] = useState<string | null>(null);
+  const [isCompressingImage, setIsCompressingImage] = useState(false);
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Existing Customers Autocomplete
+  // Existing Customers for Quick Selection
   const [customerSuggestions, setCustomerSuggestions] = useState<Array<{ name: string; whatsapp_number: string }>>([]);
 
   // Toast
@@ -69,7 +113,7 @@ export default function StockRequestsPage() {
 
   const showToast = (type: 'success' | 'error', text: string) => {
     setToast({ type, text });
-    setTimeout(() => setToast(null), 5000);
+    setTimeout(() => setToast(null), 4000);
   };
 
   const fetchStockRequests = useCallback(async () => {
@@ -98,31 +142,31 @@ export default function StockRequestsPage() {
     fetchStockRequests();
   }, [fetchStockRequests]);
 
-  // Load pharmacy settings & customers for autocomplete
+  // Load pharmacy settings & customers concurrently in background
   useEffect(() => {
-    fetch(`/api/settings?t=${Date.now()}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data?.settings?.pharmacy_name) {
-          setPharmacyName(data.settings.pharmacy_name);
-        }
-      })
-      .catch(() => {});
-
-    fetch(`/api/customers?t=${Date.now()}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data?.customers) {
-          setCustomerSuggestions(
-            data.customers.map((c: any) => ({ name: c.name, whatsapp_number: c.whatsapp_number }))
-          );
-        }
-      })
-      .catch(() => {});
+    Promise.allSettled([
+      fetch(`/api/settings?t=${Date.now()}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data?.settings?.pharmacy_name) {
+            setPharmacyName(data.settings.pharmacy_name);
+          }
+        }),
+      fetch(`/api/customers?t=${Date.now()}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data?.customers) {
+            setCustomerSuggestions(
+              data.customers.map((c: any) => ({ name: c.name, whatsapp_number: c.whatsapp_number }))
+            );
+          }
+        }),
+    ]).catch(() => {});
   }, []);
 
   const handleOpenCreateModal = (itemToEdit?: StockRequest) => {
     setFormError(null);
+    setIsCompressingImage(false);
     if (itemToEdit) {
       setEditingRequest(itemToEdit);
       setFormCustomerName(itemToEdit.customer_name);
@@ -143,26 +187,31 @@ export default function StockRequestsPage() {
     setIsCreateModalOpen(true);
   };
 
-  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      setFormError('Please select a valid image file (JPEG, PNG, WebP).');
+      setFormError('Please select an image file (JPEG, PNG, WebP).');
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      setFormError('Image size exceeds 5MB limit. Please select a smaller photo.');
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      setFormImageData(reader.result as string);
+    try {
+      setIsCompressingImage(true);
       setFormError(null);
-    };
-    reader.readAsDataURL(file);
+      // Fast client-side resize & compression to ensure lightning-fast uploads
+      const compressedDataUrl = await compressImage(file, 800, 0.75);
+      setFormImageData(compressedDataUrl);
+    } catch {
+      setFormError('Failed to process image. Please try another photo.');
+    } finally {
+      setIsCompressingImage(false);
+    }
+  };
+
+  const handleSelectCustomerSuggestion = (c: { name: string; whatsapp_number: string }) => {
+    setFormCustomerName(c.name);
+    setFormPhone(c.whatsapp_number);
   };
 
   const handleSaveStockRequest = async (e: React.FormEvent) => {
@@ -191,7 +240,7 @@ export default function StockRequestsPage() {
         customer_name: formCustomerName.trim(),
         whatsapp_number: formPhone.trim(),
         product_name: formProductName.trim(),
-        quantity: formQuantity.trim(),
+        quantity: formQuantity.trim() || '1',
         notes: formNotes.trim() || undefined,
         image_url: formImageData || undefined,
       };
@@ -226,6 +275,9 @@ export default function StockRequestsPage() {
   const handleDeleteRequest = async (id: string, name: string) => {
     if (!confirm(`Are you sure you want to delete this stock request for "${name}"?`)) return;
 
+    // Optimistic UI update
+    setRequests((prev) => prev.filter((x) => x.id !== id));
+
     try {
       const res = await fetch(`/api/stock-requests/${id}`, { method: 'DELETE' });
       if (res.ok) {
@@ -233,14 +285,21 @@ export default function StockRequestsPage() {
         fetchStockRequests();
       } else {
         showToast('error', 'Failed to delete request');
+        fetchStockRequests();
       }
     } catch {
       showToast('error', 'Network error deleting request');
+      fetchStockRequests();
     }
   };
 
   const handleMarkArrivedAndNotify = async (item: StockRequest, sendWhatsAppDirect: boolean = true) => {
     try {
+      // Optimistic update
+      setRequests((prev) =>
+        prev.map((r) => (r.id === item.id ? { ...r, status: 'ARRIVED' } : r))
+      );
+
       const res = await fetch(`/api/stock-requests/${item.id}/mark-arrived`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -254,7 +313,7 @@ export default function StockRequestsPage() {
         if (data.whatsapp?.success) {
           showToast('success', `✅ WhatsApp arrival alert sent automatically!`);
         }
-        
+
         // Open WhatsApp Web if direct requested
         if (sendWhatsAppDirect && data.whatsapp_url) {
           window.open(data.whatsapp_url, '_blank', 'noopener,noreferrer');
@@ -264,9 +323,11 @@ export default function StockRequestsPage() {
         fetchStockRequests();
       } else {
         showToast('error', `❌ Failed: ${data?.error || 'Server error'}`);
+        fetchStockRequests();
       }
     } catch (err: any) {
       showToast('error', `❌ Network error: ${err?.message || 'Please check connection'}`);
+      fetchStockRequests();
     }
   };
 
@@ -292,7 +353,6 @@ export default function StockRequestsPage() {
         showToast('success', `✅ WhatsApp arrival notification sent to ${item.customer_name}!`);
         fetchStockRequests();
       } else {
-        // Fallback to wa.me
         const url = getWhatsAppDirectUrl(item.whatsapp_number, textMessage);
         window.open(url, '_blank', 'noopener,noreferrer');
       }
@@ -303,6 +363,10 @@ export default function StockRequestsPage() {
   };
 
   const handleMarkFulfilled = async (item: StockRequest) => {
+    setRequests((prev) =>
+      prev.map((r) => (r.id === item.id ? { ...r, status: 'FULFILLED' } : r))
+    );
+
     try {
       const res = await fetch(`/api/stock-requests/${item.id}`, {
         method: 'PUT',
@@ -315,6 +379,7 @@ export default function StockRequestsPage() {
       }
     } catch {
       showToast('error', 'Failed to update status');
+      fetchStockRequests();
     }
   };
 
@@ -349,7 +414,7 @@ export default function StockRequestsPage() {
             Stock Requests (Unavailable Medicines)
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            Record customer orders for out-of-stock items, attach product photos, and notify them instantly when stock arrives.
+            Record customer orders for out-of-stock items, attach product photos (optional), and notify them instantly when stock arrives.
           </p>
         </div>
 
@@ -734,6 +799,27 @@ export default function StockRequestsPage() {
             </div>
 
             <form onSubmit={handleSaveStockRequest} className="py-4 space-y-4">
+              {/* Customer Suggestions Pills if creating new */}
+              {!editingRequest && customerSuggestions.length > 0 && (
+                <div>
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+                    Quick Pick Customer (Optional)
+                  </span>
+                  <div className="flex items-center gap-1.5 flex-wrap max-h-20 overflow-y-auto p-1 bg-slate-50 rounded-xl border border-slate-200/60">
+                    {customerSuggestions.slice(0, 8).map((c, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => handleSelectCustomerSuggestion(c)}
+                        className="px-2.5 py-1 bg-white hover:bg-emerald-50 hover:border-emerald-300 text-slate-700 text-[11px] font-bold rounded-lg border border-slate-200 transition-colors shadow-2xs"
+                      >
+                        {c.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Customer Name */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
@@ -823,10 +909,15 @@ export default function StockRequestsPage() {
                 </div>
 
                 <p className="text-[11px] text-slate-500">
-                  You can attach a prescription or box photo. If attached, it will be included when alerting the customer of stock arrival.
+                  You can attach a prescription or medicine box photo. Photos are automatically compressed for high-speed sending.
                 </p>
 
-                {formImageData ? (
+                {isCompressingImage ? (
+                  <div className="py-6 text-center text-xs font-bold text-emerald-700 flex items-center justify-center gap-2">
+                    <div className="w-4 h-4 border-2 border-emerald-600/30 border-t-emerald-600 rounded-full animate-spin" />
+                    <span>Processing photo...</span>
+                  </div>
+                ) : formImageData ? (
                   <div className="relative rounded-xl overflow-hidden border border-slate-200 max-h-48 bg-white flex items-center justify-center group">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
@@ -898,7 +989,7 @@ export default function StockRequestsPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={formSubmitting}
+                  disabled={formSubmitting || isCompressingImage}
                   className="px-5 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-xl shadow-md shadow-emerald-600/30 transition-all disabled:opacity-60"
                 >
                   {formSubmitting ? 'Saving...' : editingRequest ? 'Update Request' : 'Save Stock Request'}

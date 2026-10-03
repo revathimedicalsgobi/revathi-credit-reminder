@@ -1,28 +1,76 @@
-import fs from 'fs';
-import path from 'path';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { StockRequest, StockRequestStatus, CreateStockRequestInput, UpdateStockRequestInput } from '@/lib/types';
 import { formatPhoneForGateway } from '@/lib/whatsapp-gateway';
 
-const FALLBACK_FILE_PATH = path.join(process.cwd(), '.stock_requests_data.json');
+// In-memory memory cache for fast sub-millisecond responses
+let memoryCache: StockRequest[] | null = null;
+let lastCacheFetchTime = 0;
+const CACHE_TTL_MS = 2000; // 2 seconds TTL
 
-function getFallbackStore(): StockRequest[] {
+/**
+ * Fetch from Supabase cloud settings fallback store
+ */
+async function getCloudStore(supabase: ReturnType<typeof createAdminClient>): Promise<StockRequest[]> {
+  const now = Date.now();
+  if (memoryCache && now - lastCacheFetchTime < CACHE_TTL_MS) {
+    return memoryCache;
+  }
+
   try {
-    if (fs.existsSync(FALLBACK_FILE_PATH)) {
-      const content = fs.readFileSync(FALLBACK_FILE_PATH, 'utf-8');
-      return JSON.parse(content);
+    const { data } = await supabase
+      .from('settings')
+      .select('display_name')
+      .eq('pharmacy_name', 'STOCK_REQUESTS_STORE')
+      .maybeSingle();
+
+    if (data?.display_name) {
+      const parsed = JSON.parse(data.display_name);
+      if (Array.isArray(parsed)) {
+        memoryCache = parsed;
+        lastCacheFetchTime = now;
+        return parsed;
+      }
     }
   } catch (err) {
-    console.warn('Could not read fallback stock requests file:', err);
+    console.warn('Error reading cloud stock store:', err);
   }
-  return [];
+
+  return memoryCache || [];
 }
 
-function saveFallbackStore(data: StockRequest[]): void {
+/**
+ * Save to Supabase cloud settings fallback store
+ */
+async function saveCloudStore(supabase: ReturnType<typeof createAdminClient>, data: StockRequest[]): Promise<void> {
+  memoryCache = data;
+  lastCacheFetchTime = Date.now();
+
   try {
-    fs.writeFileSync(FALLBACK_FILE_PATH, JSON.stringify(data, null, 2), 'utf-8');
+    const jsonStr = JSON.stringify(data);
+    const { data: existing } = await supabase
+      .from('settings')
+      .select('id')
+      .eq('pharmacy_name', 'STOCK_REQUESTS_STORE')
+      .maybeSingle();
+
+    if (existing?.id) {
+      await supabase
+        .from('settings')
+        .update({
+          display_name: jsonStr,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existing.id);
+    } else {
+      await supabase.from('settings').insert({
+        pharmacy_name: 'STOCK_REQUESTS_STORE',
+        display_name: jsonStr,
+        reminders_enabled: false,
+        max_reminder_days: 1,
+      });
+    }
   } catch (err) {
-    console.error('Could not write fallback stock requests file:', err);
+    console.error('Error writing to cloud stock store:', err);
   }
 }
 
@@ -47,6 +95,7 @@ export async function getStockRequests({
 }> {
   const supabase = createAdminClient();
 
+  // Try direct table first
   try {
     let query = supabase
       .from('stock_requests')
@@ -66,9 +115,9 @@ export async function getStockRequests({
         const s = search.toLowerCase().trim();
         items = items.filter(
           (item) =>
-            item.customer_name.toLowerCase().includes(s) ||
-            item.whatsapp_number.includes(s) ||
-            item.product_name.toLowerCase().includes(s) ||
+            item.customer_name?.toLowerCase().includes(s) ||
+            item.whatsapp_number?.includes(s) ||
+            item.product_name?.toLowerCase().includes(s) ||
             (item.notes && item.notes.toLowerCase().includes(s))
         );
       }
@@ -86,12 +135,12 @@ export async function getStockRequests({
 
       return { stock_requests: items, stats };
     }
-  } catch (err) {
-    console.warn('Supabase stock_requests table not available, using file fallback:', err);
+  } catch {
+    // Fall through to cloud store
   }
 
-  // Fallback store
-  let items = getFallbackStore();
+  // Cloud Store Fallback
+  let items = await getCloudStore(supabase);
   const allCount = items.length;
   const stats = {
     total: allCount,
@@ -109,9 +158,9 @@ export async function getStockRequests({
     const s = search.toLowerCase().trim();
     items = items.filter(
       (item) =>
-        item.customer_name.toLowerCase().includes(s) ||
-        item.whatsapp_number.includes(s) ||
-        item.product_name.toLowerCase().includes(s) ||
+        item.customer_name?.toLowerCase().includes(s) ||
+        item.whatsapp_number?.includes(s) ||
+        item.product_name?.toLowerCase().includes(s) ||
         (item.notes && item.notes.toLowerCase().includes(s))
     );
   }
@@ -142,7 +191,7 @@ export async function getStockRequestById(id: string): Promise<StockRequest | nu
     // Fallback
   }
 
-  const store = getFallbackStore();
+  const store = await getCloudStore(supabase);
   return store.find((x) => x.id === id) || null;
 }
 
@@ -154,7 +203,7 @@ export async function createStockRequest(input: CreateStockRequestInput): Promis
   const phone = formatPhoneForGateway(input.whatsapp_number);
   const now = new Date().toISOString();
 
-  // Try to find or create customer in customers table
+  // Try to find or link customer in customers table
   let customerId: string | null = null;
   try {
     const { data: existingCust } = await supabase
@@ -174,13 +223,13 @@ export async function createStockRequest(input: CreateStockRequestInput): Promis
           whatsapp_number: phone,
         })
         .select('id')
-        .single();
+        .maybeSingle();
       if (newCust?.id) {
         customerId = newCust.id;
       }
     }
   } catch (custErr) {
-    console.warn('Customer upsert for stock request notice:', custErr);
+    console.warn('Customer lookup notice for stock request:', custErr);
   }
 
   const payload = {
@@ -209,18 +258,18 @@ export async function createStockRequest(input: CreateStockRequestInput): Promis
       return data as StockRequest;
     }
   } catch (err) {
-    console.warn('Supabase stock_requests insert fallback:', err);
+    console.warn('Supabase stock_requests insert notice:', err);
   }
 
-  // Fallback
+  // Save to Cloud Settings Store
   const newItem: StockRequest = {
-    id: `sr_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+    id: `sr_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
     ...payload,
   };
 
-  const store = getFallbackStore();
-  store.unshift(newItem);
-  saveFallbackStore(store);
+  const store = await getCloudStore(supabase);
+  const updated = [newItem, ...store];
+  await saveCloudStore(supabase, updated);
 
   return newItem;
 }
@@ -263,11 +312,11 @@ export async function updateStockRequest(
       return data as StockRequest;
     }
   } catch (err) {
-    console.warn('Supabase stock_requests update fallback:', err);
+    console.warn('Supabase stock_requests update notice:', err);
   }
 
-  // Fallback
-  const store = getFallbackStore();
+  // Update in Cloud Store
+  const store = await getCloudStore(supabase);
   const idx = store.findIndex((x) => x.id === id);
   if (idx === -1) return null;
 
@@ -275,7 +324,7 @@ export async function updateStockRequest(
     ...store[idx],
     ...updateData,
   };
-  saveFallbackStore(store);
+  await saveCloudStore(supabase, store);
   return store[idx];
 }
 
@@ -292,10 +341,10 @@ export async function deleteStockRequest(id: string): Promise<boolean> {
     // Fallback
   }
 
-  const store = getFallbackStore();
+  const store = await getCloudStore(supabase);
   const filtered = store.filter((x) => x.id !== id);
   if (filtered.length !== store.length) {
-    saveFallbackStore(filtered);
+    await saveCloudStore(supabase, filtered);
     return true;
   }
   return false;

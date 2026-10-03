@@ -59,17 +59,22 @@ export default function DashboardPage() {
   const fetchData = useCallback(async () => {
     try {
       const timestamp = Date.now();
-      const statsRes = await fetch(`/api/stats?t=${timestamp}`, { cache: 'no-store' });
-      const statsData = await statsRes.json();
+      const filterParam = statusFilter === 'ALL' ? '' : `status=${statusFilter}`;
+      const searchParam = searchTerm ? `&search=${encodeURIComponent(searchTerm)}` : '';
+
+      const [statsRes, purchasesRes] = await Promise.all([
+        fetch(`/api/stats?t=${timestamp}`, { cache: 'no-store' }),
+        fetch(`/api/purchases?t=${timestamp}&${filterParam}${searchParam}`, { cache: 'no-store' }),
+      ]);
+
+      const [statsData, purchasesData] = await Promise.all([
+        statsRes.json().catch(() => ({})),
+        purchasesRes.json().catch(() => ({})),
+      ]);
+
       if (statsData?.stats) {
         setStats(statsData.stats);
       }
-
-      const filterParam = statusFilter === 'ALL' ? '' : `status=${statusFilter}`;
-      const searchParam = searchTerm ? `&search=${encodeURIComponent(searchTerm)}` : '';
-      const purchasesRes = await fetch(`/api/purchases?t=${timestamp}&${filterParam}${searchParam}`, { cache: 'no-store' });
-      const purchasesData = await purchasesRes.json();
-
       if (purchasesData?.purchases) {
         setPurchases(purchasesData.purchases);
       }
@@ -80,6 +85,7 @@ export default function DashboardPage() {
       setRefreshing(false);
     }
   }, [statusFilter, searchTerm]);
+
 
   useEffect(() => {
     fetchData();
