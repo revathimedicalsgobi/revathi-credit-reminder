@@ -28,6 +28,7 @@ import { maskWhatsAppNumber } from '@/lib/utils';
 import { PurchaseSummaryCard } from '@/components/PurchaseSummaryCard';
 import { ProcessPurchaseModal } from '@/components/ProcessPurchaseModal';
 import { MedicineNameScannerModal, ScannerMode } from '@/components/MedicineNameScannerModal';
+import { CustomerSearchDropdown } from '@/components/CustomerSearchDropdown';
 
 interface ItemRow {
   id: string;
@@ -448,199 +449,48 @@ function NewPurchaseContent() {
                   <User className="w-4 h-4 text-emerald-600" />
                   Customer Details
                 </h2>
-
-                {matchedCustomer && (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-full text-xs font-bold animate-in fade-in">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Saved Customer {matchedCustomer.outstanding_balance > 0 ? `(Due: ${formatINR(matchedCustomer.outstanding_balance)})` : `(Settled)`}</span>
-                  </span>
-                )}
               </div>
 
-              {/* Searchable Saved Customers Combobox */}
-              <div ref={customerDropdownRef} className="relative">
-                <label className="block text-xs font-bold text-slate-700 uppercase mb-1 flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <Search className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Search Saved Customer (Dropdown)</span>
-                  </span>
-                  <span className="text-[11px] text-slate-400 font-normal">
-                    {savedCustomers.length} registered customers
-                  </span>
-                </label>
+              {/* Searchable Unified Customer Combobox */}
+              <CustomerSearchDropdown
+                selectedCustomerName={customerName}
+                selectedPhone={whatsappNumber}
+                onChangeCustomer={({ name, phone, id }) => {
+                  setCustomerName(name);
+                  if (phone) {
+                    setWhatsappNumber(phone);
+                  }
+                  if (id) {
+                    setSelectedCustomerId(id);
+                  }
+                  setSaveToMasterMessage(null);
+                }}
+                label="Customer (Search Saved or Type New)"
+                placeholder="Type name or phone to search registered customers..."
+              />
 
-                {/* Search Input Bar */}
+              {/* WhatsApp Number Input */}
+              <div className="pt-1">
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-1 flex items-center justify-between">
+                  <span>WhatsApp Number *</span>
+                  <span className="text-[10px] text-slate-400 font-normal">10-digit mobile</span>
+                </label>
                 <div className="relative">
                   <input
-                    type="text"
-                    placeholder="Type name or phone to search saved customers..."
-                    value={customerSearchQuery}
-                    onFocus={() => setIsCustomerDropdownOpen(true)}
+                    type="tel"
+                    required
+                    placeholder="e.g. 9876543210"
+                    value={whatsappNumber}
                     onChange={(e) => {
-                      setCustomerSearchQuery(e.target.value);
-                      setIsCustomerDropdownOpen(true);
-                      setCustomerName(e.target.value);
+                      setWhatsappNumber(e.target.value);
                       setSaveToMasterMessage(null);
                     }}
-                    className="w-full pl-9 pr-20 py-2.5 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white shadow-2xs text-slate-900"
+                    className="w-full pl-3 pr-3 py-2.5 text-xs font-semibold rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white text-slate-900 shadow-2xs font-mono"
                   />
-                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-
-                  <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                    {(customerSearchQuery || customerName || whatsappNumber) && (
-                      <button
-                        type="button"
-                        onClick={handleClearCustomerSelection}
-                        className="p-1 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100"
-                        title="Clear customer"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => setIsCustomerDropdownOpen(!isCustomerDropdownOpen)}
-                      className="p-1 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100"
-                    >
-                      <ChevronDown
-                        className={`w-4 h-4 transition-transform duration-200 ${
-                          isCustomerDropdownOpen ? 'rotate-180 text-emerald-600' : ''
-                        }`}
-                      />
-                    </button>
-                  </div>
                 </div>
-
-                {/* Floating Searchable Dropdown Menu */}
-                {isCustomerDropdownOpen && (
-                  <div className="absolute left-0 right-0 top-full mt-1.5 z-30 bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden max-h-64 overflow-y-auto animate-in fade-in slide-in-from-top-1 duration-150">
-                    <div className="p-2 border-b border-slate-100 bg-slate-50 flex items-center justify-between text-[11px] text-slate-500 font-bold uppercase tracking-wider">
-                      <span>Saved Customers ({filteredCustomers.length})</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          handleClearCustomerSelection();
-                          setIsCustomerDropdownOpen(false);
-                        }}
-                        className="text-emerald-700 hover:underline font-bold"
-                      >
-                        + New Customer
-                      </button>
-                    </div>
-
-                    {isLoadingCustomers ? (
-                      <div className="py-6 text-center text-xs text-slate-400">
-                        Loading saved customers...
-                      </div>
-                    ) : filteredCustomers.length === 0 ? (
-                      <div className="p-4 text-center space-y-2">
-                        <p className="text-xs text-slate-500">
-                          No saved customer found matching &quot;{customerSearchQuery}&quot;
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setCustomerName(customerSearchQuery);
-                            setIsCustomerDropdownOpen(false);
-                          }}
-                          className="px-3 py-1.5 bg-emerald-50 text-emerald-800 rounded-lg text-xs font-bold hover:bg-emerald-100 border border-emerald-200"
-                        >
-                          Use &quot;{customerSearchQuery}&quot; as New Customer
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="divide-y divide-slate-100">
-                        {filteredCustomers.map((customer) => {
-                          const isSelected = selectedCustomerId === customer.id || (matchedCustomer && matchedCustomer.id === customer.id);
-                          const hasDue = customer.outstanding_balance > 0;
-
-                          return (
-                            <button
-                              key={customer.id}
-                              type="button"
-                              onClick={() => handleSelectCustomer(customer)}
-                              className={`w-full p-3 text-left flex items-center justify-between hover:bg-emerald-50/70 transition-colors ${
-                                isSelected ? 'bg-emerald-50 border-l-4 border-emerald-600' : ''
-                              }`}
-                            >
-                              <div className="flex items-center gap-2.5 min-w-0">
-                                <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-800 font-bold text-xs flex items-center justify-center flex-shrink-0">
-                                  {customer.name.slice(0, 2).toUpperCase()}
-                                </div>
-                                <div className="truncate">
-                                  <div className="text-sm font-bold text-slate-900 truncate">
-                                    {customer.name}
-                                  </div>
-                                  <div className="text-xs text-slate-500 font-mono flex items-center gap-1">
-                                    <Phone className="w-3 h-3 text-slate-400" />
-                                    <span>{maskWhatsAppNumber(customer.whatsapp_number)}</span>
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div className="text-right flex-shrink-0 ml-2">
-                                {hasDue ? (
-                                  <span className="text-xs font-black text-rose-700 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200">
-                                    Due: {formatINR(customer.outstanding_balance)}
-                                  </span>
-                                ) : (
-                                  <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                                    ✓ Settled
-                                  </span>
-                                )}
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Customer Name & WhatsApp Inputs */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Customer Name *
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. Ravi Kumar"
-                      value={customerName}
-                      onChange={(e) => {
-                        setCustomerName(e.target.value);
-                        setCustomerSearchQuery(e.target.value);
-                        setSaveToMasterMessage(null);
-                      }}
-                      className="w-full pl-3 pr-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50/50 focus:bg-white"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    WhatsApp Number *
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="tel"
-                      required
-                      placeholder="e.g. 9876543210 or +91..."
-                      value={whatsappNumber}
-                      onChange={(e) => {
-                        setWhatsappNumber(e.target.value);
-                        setSaveToMasterMessage(null);
-                      }}
-                      className="w-full pl-3 pr-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50/50 focus:bg-white font-mono"
-                    />
-                  </div>
-                  <span className="text-[11px] text-slate-400 mt-1 block">
-                    Normalized: {whatsappNumber ? normalizeWhatsAppNumber(whatsappNumber) : '+91...'}
-                  </span>
-                </div>
+                <span className="text-[11px] text-slate-400 mt-1 block font-mono">
+                  Normalized: {whatsappNumber ? normalizeWhatsAppNumber(whatsappNumber) : '+91...'}
+                </span>
               </div>
 
               {/* New Customer Detected Prompt & Save Button */}

@@ -27,6 +27,7 @@ import {
 import { StockRequest } from '@/lib/types';
 import { formatShortDate, maskWhatsAppNumber } from '@/lib/utils';
 import { buildWhatsAppStockArrivalText, getWhatsAppDirectUrl } from '@/lib/whatsapp-share';
+import { CustomerSearchDropdown } from '@/components/CustomerSearchDropdown';
 
 /**
  * Client-side fast image compressor using Canvas
@@ -799,46 +800,25 @@ export default function StockRequestsPage() {
             </div>
 
             <form onSubmit={handleSaveStockRequest} className="py-4 space-y-4">
-              {/* Customer Suggestions Pills if creating new */}
-              {!editingRequest && customerSuggestions.length > 0 && (
-                <div>
-                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-                    Quick Pick Customer (Optional)
-                  </span>
-                  <div className="flex items-center gap-1.5 flex-wrap max-h-20 overflow-y-auto p-1 bg-slate-50 rounded-xl border border-slate-200/60">
-                    {customerSuggestions.slice(0, 8).map((c, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => handleSelectCustomerSuggestion(c)}
-                        className="px-2.5 py-1 bg-white hover:bg-emerald-50 hover:border-emerald-300 text-slate-700 text-[11px] font-bold rounded-lg border border-slate-200 transition-colors shadow-2xs"
-                      >
-                        {c.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Customer Name */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                  Customer Name *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={formCustomerName}
-                  onChange={(e) => setFormCustomerName(e.target.value)}
-                  placeholder="e.g. Ramesh Kumar"
-                  className="w-full px-3.5 py-2.5 text-xs font-semibold text-slate-900 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
+              {/* Searchable Customer Dropdown */}
+              <CustomerSearchDropdown
+                selectedCustomerName={formCustomerName}
+                selectedPhone={formPhone}
+                onChangeCustomer={({ name, phone }) => {
+                  setFormCustomerName(name);
+                  if (phone) {
+                    setFormPhone(phone);
+                  }
+                }}
+                label="Customer (Search Saved or Type New)"
+                placeholder="Type name or phone to search registered customers..."
+              />
 
               {/* Customer Phone */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                  WhatsApp Phone Number *
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-1 flex items-center justify-between">
+                  <span>WhatsApp Phone Number *</span>
+                  <span className="text-[10px] text-slate-400 font-normal">10-digit mobile</span>
                 </label>
                 <input
                   type="tel"
@@ -846,7 +826,7 @@ export default function StockRequestsPage() {
                   value={formPhone}
                   onChange={(e) => setFormPhone(e.target.value)}
                   placeholder="e.g. 9876543210"
-                  className="w-full px-3.5 py-2.5 text-xs font-semibold text-slate-900 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="w-full px-3.5 py-2.5 text-xs font-semibold text-slate-900 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs"
                 />
               </div>
 
