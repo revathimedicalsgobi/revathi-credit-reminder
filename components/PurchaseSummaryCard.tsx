@@ -5,7 +5,8 @@ import { formatINR } from '@/lib/calculations';
 import { formatShortDate, numberToIndianRupeeWords } from '@/lib/utils';
 import { PaymentStatusBadge } from '@/components/StatusBadge';
 import { PaymentStatus } from '@/lib/types';
-import { Printer, QrCode, ShieldCheck, Download, MessageCircle, Check } from 'lucide-react';
+import { Printer, QrCode, ShieldCheck, Download, MessageCircle, Check, ExternalLink } from 'lucide-react';
+
 import {
   buildWhatsAppSummaryText,
   getWhatsAppDirectUrl,

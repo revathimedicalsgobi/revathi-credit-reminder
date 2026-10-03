@@ -193,22 +193,37 @@ export interface WhatsAppThankYouData {
   recipientPhone: string;
   amountReceived: number;
   totalBillAmount?: number;
-  remainingBalance?: number;
+  remainingBalance?: number; // Remaining on this specific bill
   isPartial?: boolean;
+  totalOutstandingBalance?: number; // Total remaining across ALL bills for this customer
+  otherPendingBillsCount?: number;
   pharmacyName?: string;
+  upiId?: string | null;
 }
 
 /**
- * Builds polite thank-you message for WhatsApp Web
+ * Builds polite thank-you message for WhatsApp Web / Gateway
+ * If the customer has other pending bills, it accurately reminds them of their remaining total balance!
+ * It only claims "All dues cleared" if total outstanding balance across all bills is 0.
  */
 export function buildWhatsAppThankYouText(data: WhatsAppThankYouData): string {
   const pharmacy = data.pharmacyName || 'Revathi Medicals & Distributors';
   const amountStr = formatINR(data.amountReceived);
   const customerGreeting = formatCustomerSalutation(data.customerName);
+  const upiLine = data.upiId ? `\n💳 *UPI ID:* \`${data.upiId}\`` : '';
 
+  const hasTotalBalanceInfo = data.totalOutstandingBalance !== undefined;
+  const overallBalance = hasTotalBalanceInfo
+    ? Number(data.totalOutstandingBalance || 0)
+    : Number(data.remainingBalance || 0);
+
+  // 1. Partial payment on this specific bill
   if (data.isPartial && data.remainingBalance && data.remainingBalance > 0) {
-    const remainingStr = formatINR(data.remainingBalance);
-    const totalStr = data.totalBillAmount ? formatINR(data.totalBillAmount) : '';
+    const remainingThisBillStr = formatINR(data.remainingBalance);
+    const totalBillStr = data.totalBillAmount ? formatINR(data.totalBillAmount) : '';
+    const otherBillsText = hasTotalBalanceInfo && overallBalance > data.remainingBalance
+      ? `\n• 🔴 *Total Cumulative Account Balance:* *${formatINR(overallBalance)}*`
+      : '';
 
     return `━━━━━━━━━━━━━━━━━━━━━━━
 🏥 *${pharmacy.toUpperCase()}*
@@ -221,17 +236,45 @@ We have received your payment of *${amountStr}* successfully.
 
 ───────────────────────
 📊 *Payment Details:*
-${totalStr ? `• *Total Bill Amount:* ${totalStr}\n` : ''}• 💵 *Amount Received:* *${amountStr}*
-• ⏳ *Remaining Balance Due:* *${remainingStr}*
-───────────────────────
+${totalBillStr ? `• *Total Bill Amount:* ${totalBillStr}\n` : ''}• 💵 *Amount Received:* *${amountStr}*
+• ⏳ *This Bill Balance Due:* *${remainingThisBillStr}*${otherBillsText}
+───────────────────────${upiLine}
 
 Please settle the remaining balance at your convenience.
 Thank you for choosing *${pharmacy}*! 🙏`;
   }
 
+  // 2. This bill is fully settled, BUT the customer has other pending credit bills
+  if (overallBalance > 0) {
+    const overallBalanceStr = formatINR(overallBalance);
+    const countText = data.otherPendingBillsCount && data.otherPendingBillsCount > 0
+      ? ` (${data.otherPendingBillsCount} pending ${data.otherPendingBillsCount === 1 ? 'bill' : 'bills'})`
+      : '';
+
+    return `━━━━━━━━━━━━━━━━━━━━━━━
+🏥 *${pharmacy.toUpperCase()}*
+✅ *PAYMENT RECEIVED (BILL SETTLED)*
+━━━━━━━━━━━━━━━━━━━━━━━
+
+Hello *${customerGreeting}*,
+
+We have received your payment of *${amountStr}* successfully. This bill is now fully settled.
+
+───────────────────────
+📊 *Account Balance Reminder:*
+• 💵 *Amount Received:* *${amountStr}*
+• ✅ *This Bill Status:* Fully Settled
+• 🔴 *Remaining Outstanding Balance:* *${overallBalanceStr}*${countText}
+───────────────────────${upiLine}
+
+Kindly settle your remaining outstanding balance at your convenience.
+Thank you for choosing *${pharmacy}*! 🙏`;
+  }
+
+  // 3. All dues across ALL bills are genuinely cleared!
   return `━━━━━━━━━━━━━━━━━━━━━━━
 🏥 *${pharmacy.toUpperCase()}*
-✅ *PAYMENT RECEIVED (SETTLED)*
+✅ *PAYMENT RECEIVED (ALL DUES CLEARED)*
 ━━━━━━━━━━━━━━━━━━━━━━━
 
 Hello *${customerGreeting}*,
@@ -240,10 +283,52 @@ We have received your payment of *${amountStr}* successfully. Your bill is now f
 
 ───────────────────────
 ✨ *All dues have been cleared!*
+Your account has ₹0 pending balance.
 ───────────────────────
 
 Thank you for choosing *${pharmacy}*. We look forward to serving you again! 🙏`;
 }
+
+export interface WhatsAppStockArrivalData {
+  customerName: string;
+  recipientPhone: string;
+  productName: string;
+  quantity?: string | null;
+  requestedDate?: string | Date;
+  notes?: string | null;
+  pharmacyName?: string;
+  imageUrl?: string | null;
+}
+
+/**
+ * Builds polite stock arrival alert message for WhatsApp
+ */
+export function buildWhatsAppStockArrivalText(data: WhatsAppStockArrivalData): string {
+  const pharmacy = data.pharmacyName || 'Revathi Medicals & Distributors';
+  const customerGreeting = formatCustomerSalutation(data.customerName);
+  const qtyLine = data.quantity && data.quantity.trim() ? `• 🔢 *Quantity:* ${data.quantity.trim()}\n` : '';
+  const dateLine = data.requestedDate ? `• 📅 *Ordered On:* ${formatShortDate(data.requestedDate)}\n` : '';
+  const notesLine = data.notes && data.notes.trim() ? `• 📝 *Note:* ${data.notes.trim()}\n` : '';
+
+  return `━━━━━━━━━━━━━━━━━━━━━━━
+🏥 *${pharmacy.toUpperCase()}*
+📦 *STOCK ARRIVAL NOTIFICATION*
+━━━━━━━━━━━━━━━━━━━━━━━
+
+Hello *${customerGreeting}*,
+
+Good news! The product/medicine you requested is now *IN STOCK* and ready for pickup:
+
+───────────────────────
+💊 *Product Name:* *${data.productName}*
+${qtyLine}${dateLine}${notesLine}📍 *Available at:* *${pharmacy}*
+───────────────────────
+
+✨ Please visit our pharmacy at your earliest convenience to collect your medicine.
+
+Thank you for choosing *${pharmacy}*! 🙏`;
+}
+
 
 export interface WhatsAppStatementData {
   customerName: string;

@@ -11,9 +11,11 @@ import {
   ReceiptText,
   ShieldCheck,
   Users,
+  Boxes,
   Menu,
   X,
 } from 'lucide-react';
+
 import { createClient } from '@/lib/supabase/client';
 
 export function Navbar() {
@@ -105,6 +107,18 @@ export function Navbar() {
             </Link>
 
             <Link
+              href="/stock-requests"
+              className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-colors ${
+                pathname.startsWith('/stock-requests')
+                  ? 'bg-emerald-50 text-emerald-700 font-bold'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <Boxes className="w-4 h-4 text-emerald-600" />
+              <span>Stock Requests</span>
+            </Link>
+
+            <Link
               href="/reminders/bulk"
               className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-colors ${
                 pathname.startsWith('/reminders')
@@ -115,6 +129,7 @@ export function Navbar() {
               <ReceiptText className="w-4 h-4 text-emerald-600" />
               <span>Bulk Reminders</span>
             </Link>
+
 
             <Link
               href="/settings"
@@ -197,6 +212,20 @@ export function Navbar() {
               <Users className="w-4 h-4 text-emerald-600" />
               <span>Customers Master & Statements</span>
             </Link>
+
+            <Link
+              href="/stock-requests"
+              onClick={() => setIsMobileMenuOpen(false)}
+              className={`flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                pathname.startsWith('/stock-requests')
+                  ? 'bg-emerald-50 text-emerald-700'
+                  : 'text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <Boxes className="w-4 h-4 text-emerald-600" />
+              <span>Stock Requests (Pre-Orders)</span>
+            </Link>
+
 
             <Link
               href="/reminders/bulk"

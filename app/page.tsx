@@ -49,7 +49,10 @@ export default function DashboardPage() {
     amount: number;
     paidAmount?: number;
     balanceDue?: number;
+    customerTotalBalance?: number;
+    otherPendingBillsCount?: number;
   } | null>(null);
+
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [paymentModalError, setPaymentModalError] = useState<string | null>(null);
 
@@ -92,8 +95,12 @@ export default function DashboardPage() {
           if (data.settings.upi_id) setUpiId(data.settings.upi_id);
         }
       })
+      .catch(() => {});
+  }, []);
+
   const [sendingMap, setSendingMap] = useState<Record<string, boolean>>({});
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
 
   const showToast = (type: 'success' | 'error', text: string) => {
     setToastMessage({ type, text });
@@ -146,6 +153,20 @@ export default function DashboardPage() {
   const handleSendManualThankYou = async (purchase: Purchase) => {
     const phone = purchase.customer?.whatsapp_number || '';
     const customerName = purchase.customer?.name || 'Customer';
+
+    let totalCustomerBalance = 0;
+    let otherPendingCount = 0;
+    if (purchase.customer_id) {
+      const custPurchases = purchases.filter((p) => p.customer_id === purchase.customer_id);
+      for (const cp of custPurchases) {
+        const bal = cp.balance_due !== undefined ? cp.balance_due : (cp.payment_status === 'PAID' ? 0 : Number(cp.amount_payable));
+        if (bal > 0) {
+          totalCustomerBalance += bal;
+          if (cp.id !== purchase.id) otherPendingCount++;
+        }
+      }
+    }
+
     const thankYouText = buildWhatsAppThankYouText({
       customerName,
       recipientPhone: phone,
@@ -153,7 +174,10 @@ export default function DashboardPage() {
       totalBillAmount: Number(purchase.amount_payable),
       remainingBalance: purchase.balance_due,
       isPartial: purchase.payment_status === 'PARTIAL',
+      totalOutstandingBalance: totalCustomerBalance > 0 ? totalCustomerBalance : (purchase.balance_due || 0),
+      otherPendingBillsCount: otherPendingCount,
       pharmacyName,
+      upiId,
     });
 
     setSendingMap((prev) => ({ ...prev, [purchase.id]: true }));
@@ -188,6 +212,19 @@ export default function DashboardPage() {
 
   const handleOpenPaymentModal = (purchase: Purchase) => {
     setPaymentModalError(null);
+    let totalCustBal = 0;
+    let otherCount = 0;
+    if (purchase.customer_id) {
+      const custPurchases = purchases.filter((p) => p.customer_id === purchase.customer_id);
+      for (const cp of custPurchases) {
+        const bal = cp.balance_due !== undefined ? cp.balance_due : (cp.payment_status === 'PAID' ? 0 : Number(cp.amount_payable));
+        if (bal > 0) {
+          totalCustBal += bal;
+          if (cp.id !== purchase.id) otherCount++;
+        }
+      }
+    }
+
     setActivePaymentModal({
       purchaseId: purchase.id,
       customerName: purchase.customer?.name || 'Customer',
@@ -195,6 +232,8 @@ export default function DashboardPage() {
       amount: Number(purchase.amount_payable),
       paidAmount: Number(purchase.paid_amount || 0),
       balanceDue: purchase.balance_due,
+      customerTotalBalance: totalCustBal,
+      otherPendingBillsCount: otherCount,
     });
   };
 
@@ -219,6 +258,7 @@ export default function DashboardPage() {
 
       setActivePaymentModal(null);
       await fetchData();
+      return data;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error updating payment status';
       setPaymentModalError(msg);
@@ -227,6 +267,7 @@ export default function DashboardPage() {
       setIsProcessingPayment(false);
     }
   };
+
 
   const sortedPurchases = [...purchases].sort((a, b) => {
     const timeA = new Date(a.purchase_date).getTime();
@@ -693,10 +734,6 @@ export default function DashboardPage() {
                           </button>
                         )}
                       </div>
-                            <span>Thank-You</span>
-                          </button>
-                        )}
-                      </div>
                     </div>
                   </div>
                 );
@@ -716,11 +753,15 @@ export default function DashboardPage() {
           amountPayable={activePaymentModal.amount}
           paidAmount={activePaymentModal.paidAmount || 0}
           balanceDue={activePaymentModal.balanceDue}
+          customerTotalBalance={activePaymentModal.customerTotalBalance}
+          otherPendingBillsCount={activePaymentModal.otherPendingBillsCount}
           pharmacyName={pharmacyName}
           isProcessing={isProcessingPayment}
           errorMessage={paymentModalError}
         />
       )}
+
     </div>
   );
 }
+

@@ -117,7 +117,31 @@ export async function POST(
     const { data: settings } = await supabase.from('settings').select('*').limit(1).maybeSingle();
     const pharmacyName = settings?.pharmacy_name || 'Revathi Medicals & Distributors';
 
-    // 7. Trigger WhatsApp Receipt / Thank-You
+    // 7. Calculate customer's overall remaining balance across ALL pending bills
+    let otherPendingBalance = 0;
+    let otherPendingBillsCount = 0;
+    if (purchase.customer_id) {
+      const { data: otherPurchases } = await supabase
+        .from('purchases')
+        .select('id, amount_payable, payment_status, paid_amount, audit_logs(*)')
+        .eq('customer_id', purchase.customer_id)
+        .neq('id', purchaseId)
+        .neq('payment_status', 'PAID');
+
+      if (otherPurchases && otherPurchases.length > 0) {
+        for (const op of otherPurchases) {
+          const opEnriched = enrichPurchaseWithPayments(op as any, op.audit_logs || []);
+          if (opEnriched.balance_due && opEnriched.balance_due > 0) {
+            otherPendingBalance += opEnriched.balance_due;
+            otherPendingBillsCount++;
+          }
+        }
+      }
+    }
+    otherPendingBalance = roundToTwoDecimals(otherPendingBalance);
+    const totalOutstandingBalance = roundToTwoDecimals(newRemainingBalance + otherPendingBalance);
+
+    // 8. Trigger WhatsApp Receipt / Thank-You
     let whatsappResult = null;
     try {
       const whatsappProvider = getWhatsAppProvider();
@@ -129,8 +153,11 @@ export async function POST(
         totalBillAmount: totalPayable,
         remainingBalance: newRemainingBalance,
         isPartial: !isFullyPaid,
+        totalOutstandingBalance,
+        otherPendingBillsCount,
         pharmacyName,
         paymentReceivedAt: paymentTimestamp,
+        upiId: settings?.upi_id || null,
       });
 
       // Record in reminder_logs
@@ -151,7 +178,7 @@ export async function POST(
       };
     }
 
-    // 8. Fetch updated purchase and enrich
+    // 9. Fetch updated purchase and enrich
     const { data: finalPurchase } = await supabase
       .from('purchases')
       .select('*, customer:customers(*), items:purchase_items(*), audit_logs(*), reminder_logs(*)')
@@ -163,14 +190,19 @@ export async function POST(
     return NextResponse.json({
       success: true,
       message: isFullyPaid
-        ? 'Payment received and bill marked as fully PAID!'
+        ? (totalOutstandingBalance > 0
+            ? `Bill settled! Customer has remaining balance of ₹${totalOutstandingBalance} on other bills.`
+            : 'Payment received and all dues fully cleared!')
         : `Partial payment of ₹${paymentAmount} recorded. Remaining balance: ₹${newRemainingBalance}`,
       purchase: enrichedFinal,
       paymentAmount,
       remainingBalance: newRemainingBalance,
+      totalOutstandingBalance,
+      otherPendingBillsCount,
       isFullyPaid,
       whatsapp: whatsappResult,
     });
+
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Failed to process payment receipt';
     return NextResponse.json({ error: msg }, { status: 500 });

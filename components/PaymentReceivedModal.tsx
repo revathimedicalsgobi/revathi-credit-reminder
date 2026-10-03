@@ -10,12 +10,14 @@ import { buildWhatsAppThankYouText, getWhatsAppDirectUrl } from '@/lib/whatsapp-
 interface PaymentReceivedModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (paymentData: { amount: number; payment_mode: PaymentMode; notes?: string }) => Promise<void> | void;
+  onConfirm: (paymentData: { amount: number; payment_mode: PaymentMode; notes?: string }) => Promise<any> | any;
   customerName: string;
   whatsappNumber?: string;
   amountPayable: number;
   paidAmount?: number;
   balanceDue?: number;
+  customerTotalBalance?: number;
+  otherPendingBillsCount?: number;
   pharmacyName?: string;
   isProcessing: boolean;
   errorMessage?: string | null;
@@ -30,6 +32,8 @@ export function PaymentReceivedModal({
   amountPayable,
   paidAmount = 0,
   balanceDue,
+  customerTotalBalance,
+  otherPendingBillsCount,
   pharmacyName = 'Revathi Medicals & Distributors',
   isProcessing,
   errorMessage,
@@ -100,10 +104,18 @@ export function PaymentReceivedModal({
 
     try {
       if (isFullSettlement) triggerConfetti();
-      await onConfirm(payload);
+      const resData = await onConfirm(payload);
 
       // Open WhatsApp Web with thank you message
       if (whatsappNumber) {
+        const totalOutstanding = resData?.totalOutstandingBalance !== undefined
+          ? resData.totalOutstandingBalance
+          : (customerTotalBalance !== undefined ? Math.max(0, customerTotalBalance - enteredAmount) : newRemainingBalance);
+
+        const otherCount = resData?.otherPendingBillsCount !== undefined
+          ? resData.otherPendingBillsCount
+          : otherPendingBillsCount;
+
         const text = buildWhatsAppThankYouText({
           customerName,
           recipientPhone: whatsappNumber,
@@ -111,6 +123,8 @@ export function PaymentReceivedModal({
           totalBillAmount: amountPayable,
           remainingBalance: newRemainingBalance,
           isPartial: !isFullSettlement,
+          totalOutstandingBalance: totalOutstanding,
+          otherPendingBillsCount: otherCount,
           pharmacyName,
         });
         const url = getWhatsAppDirectUrl(whatsappNumber, text);
@@ -120,6 +134,7 @@ export function PaymentReceivedModal({
       // Handled in parent
     }
   };
+
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">

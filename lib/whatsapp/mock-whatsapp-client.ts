@@ -87,6 +87,31 @@ export class MockWhatsAppClient implements IWhatsAppProvider {
     };
   }
 
+  async sendStockArrival(payload: any): Promise<WhatsAppSendResult> {
+    const mockId = `mock_wamid_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
+    console.log(`\n========================================`);
+    console.log(`[MOCK WHATSAPP] Sending Stock Arrival Notification`);
+    console.log(`To: ${payload.customerName} (${payload.recipientPhone})`);
+    console.log(`Product: ${payload.productName}`);
+    console.log(`Image: ${payload.imageUrl ? 'Attached' : 'None'}`);
+    console.log(`Message ID: ${mockId}`);
+    console.log(`========================================\n`);
+
+    this.sentMessages.push({
+      type: 'STOCK_ARRIVAL',
+      payload,
+      timestamp: new Date().toISOString(),
+    });
+
+    return {
+      success: true,
+      messageId: mockId,
+      recipient: payload.recipientPhone,
+    };
+  }
+
+
   async getStatus(): Promise<WhatsAppProviderStatus> {
     return {
       isConfigured: false,

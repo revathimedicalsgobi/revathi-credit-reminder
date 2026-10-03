@@ -117,7 +117,10 @@ export class UltraMsgWhatsAppClient implements IWhatsAppProvider {
         totalBillAmount: payload.totalBillAmount,
         remainingBalance: payload.remainingBalance,
         isPartial: payload.isPartial,
+        totalOutstandingBalance: payload.totalOutstandingBalance,
+        otherPendingBillsCount: payload.otherPendingBillsCount,
         pharmacyName: payload.pharmacyName,
+        upiId: payload.upiId,
       });
 
       const res = await sendWhatsAppGatewayMessage({
@@ -144,6 +147,63 @@ export class UltraMsgWhatsAppClient implements IWhatsAppProvider {
       };
     }
   }
+
+  async sendStockArrival(payload: any): Promise<WhatsAppSendResult> {
+    try {
+      const { buildWhatsAppStockArrivalText } = await import('../whatsapp-share');
+      const { sendWhatsAppGatewayImage } = await import('../whatsapp-gateway');
+
+      const textMessage = buildWhatsAppStockArrivalText({
+        customerName: payload.customerName,
+        recipientPhone: payload.recipientPhone,
+        productName: payload.productName,
+        quantity: payload.quantity,
+        requestedDate: payload.requestedDate,
+        notes: payload.notes,
+        pharmacyName: payload.pharmacyName,
+        imageUrl: payload.imageUrl,
+      });
+
+      let res;
+      if (payload.imageUrl && payload.imageUrl.trim().length > 0) {
+        // Send image with text caption
+        res = await sendWhatsAppGatewayImage({
+          to: payload.recipientPhone,
+          image: payload.imageUrl,
+          caption: textMessage,
+          config: {
+            instanceId: this.instanceId,
+            token: this.token,
+          },
+        });
+      } else {
+        // Send text message
+        res = await sendWhatsAppGatewayMessage({
+          to: payload.recipientPhone,
+          body: textMessage,
+          config: {
+            instanceId: this.instanceId,
+            token: this.token,
+          },
+        });
+      }
+
+      return {
+        success: res.success,
+        messageId: res.messageId,
+        recipient: payload.recipientPhone,
+        error: res.error,
+        rawResponse: res,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        recipient: payload.recipientPhone,
+        error: err?.message || 'Failed to send Stock Arrival alert via UltraMsg',
+      };
+    }
+  }
+
 
   async getStatus(): Promise<WhatsAppProviderStatus> {
     try {

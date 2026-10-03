@@ -60,8 +60,22 @@ export interface PaymentReceivedMessagePayload {
   totalBillAmount?: number;
   remainingBalance?: number;
   isPartial?: boolean;
+  totalOutstandingBalance?: number;
+  otherPendingBillsCount?: number;
   pharmacyName: string;
   paymentReceivedAt: string;
+  upiId?: string | null;
+}
+
+export interface StockArrivalMessagePayload {
+  customerName: string;
+  recipientPhone: string;
+  productName: string;
+  quantity?: string | null;
+  requestedDate?: string | Date;
+  notes?: string | null;
+  imageUrl?: string | null;
+  pharmacyName: string;
 }
 
 export interface WhatsAppProviderStatus {
@@ -77,5 +91,7 @@ export interface IWhatsAppProvider {
   sendPurchaseSummary(payload: PurchaseSummaryMessagePayload): Promise<WhatsAppSendResult>;
   sendPaymentReminder(payload: PaymentReminderMessagePayload): Promise<WhatsAppSendResult>;
   sendPaymentReceived(payload: PaymentReceivedMessagePayload): Promise<WhatsAppSendResult>;
+  sendStockArrival?(payload: StockArrivalMessagePayload): Promise<WhatsAppSendResult>;
   getStatus(): Promise<WhatsAppProviderStatus>;
 }
+

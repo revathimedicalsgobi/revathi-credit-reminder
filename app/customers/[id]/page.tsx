@@ -282,7 +282,10 @@ export default function CustomerStatementDetailPage() {
       totalBillAmount: Number(purchase.amount_payable),
       remainingBalance: purchase.balance_due,
       isPartial: purchase.payment_status === 'PARTIAL',
+      totalOutstandingBalance: statement.summary.outstanding_balance,
+      otherPendingBillsCount: Math.max(0, statement.summary.pending_bills_count - 1),
       pharmacyName,
+      upiId,
     });
 
     setSendingSingleMap((prev) => ({ ...prev, [purchase.id]: true }));
@@ -329,6 +332,7 @@ export default function CustomerStatementDetailPage() {
 
       setActivePaymentModal(null);
       await fetchCustomerStatement();
+      return data;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error updating payment status';
       setPaymentModalError(msg);
@@ -337,6 +341,7 @@ export default function CustomerStatementDetailPage() {
       setIsProcessingPayment(false);
     }
   };
+
 
   if (loading) {
     return (
@@ -898,11 +903,14 @@ export default function CustomerStatementDetailPage() {
           amountPayable={activePaymentModal.amount}
           paidAmount={activePaymentModal.paidAmount || 0}
           balanceDue={activePaymentModal.balanceDue}
+          customerTotalBalance={statement.summary.outstanding_balance}
+          otherPendingBillsCount={Math.max(0, statement.summary.pending_bills_count - 1)}
           pharmacyName={pharmacyName}
           isProcessing={isProcessingPayment}
           errorMessage={paymentModalError}
         />
       )}
+
     </div>
   );
 }

@@ -187,6 +187,8 @@ function PurchaseDetailContent() {
     if (!purchase) return;
     const phone = purchase.customer?.whatsapp_number || '';
     const customerName = purchase.customer?.name || 'Customer';
+    const totalRemaining = Number(previousBalance || 0) + Number(purchase.balance_due !== undefined ? purchase.balance_due : purchase.amount_payable);
+
     const thankYouText = buildWhatsAppThankYouText({
       customerName,
       recipientPhone: phone,
@@ -194,10 +196,14 @@ function PurchaseDetailContent() {
       totalBillAmount: Number(purchase.amount_payable),
       remainingBalance: purchase.balance_due,
       isPartial: purchase.payment_status === 'PARTIAL',
+      totalOutstandingBalance: totalRemaining,
+      otherPendingBillsCount: dateWisePendingBills.length,
       pharmacyName,
+      upiId,
     });
 
     setIsSendingDirect(true);
+
 
     try {
       const res = await fetch('/api/whatsapp/send', {
@@ -293,6 +299,7 @@ function PurchaseDetailContent() {
       setShowPaymentModal(false);
       setActionSuccessMsg(data.message || 'Payment recorded successfully!');
       await fetchPurchase();
+      return data;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to process payment';
       setPaymentModalError(msg);
@@ -690,11 +697,14 @@ function PurchaseDetailContent() {
           amountPayable={totalAmount}
           paidAmount={paidAmount}
           balanceDue={balanceDue}
+          customerTotalBalance={cumulativeTotal}
+          otherPendingBillsCount={dateWisePendingBills.length}
           pharmacyName={pharmacyName}
           isProcessing={isProcessingPayment}
           errorMessage={paymentModalError}
         />
       )}
+
     </div>
   );
 }

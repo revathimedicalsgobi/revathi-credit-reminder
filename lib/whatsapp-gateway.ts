@@ -162,3 +162,75 @@ export async function sendWhatsAppGatewayMessage({
     };
   }
 }
+
+/**
+ * Send an automated WhatsApp image message directly to a recipient phone number
+ */
+export async function sendWhatsAppGatewayImage({
+  to,
+  image,
+  caption,
+  config,
+}: {
+  to: string;
+  image: string; // URL or base64 data URI
+  caption?: string;
+  config?: WhatsAppGatewayConfig;
+}): Promise<SendMessageResponse> {
+  const { instanceId, token } = getGatewayCredentials(config);
+
+  if (!instanceId || !token) {
+    return {
+      success: false,
+      error: 'WhatsApp Gateway not configured. Missing instanceId or token.',
+    };
+  }
+
+  const cleanTo = formatPhoneForGateway(to);
+  if (!cleanTo || cleanTo.length < 10) {
+    return {
+      success: false,
+      error: `Invalid recipient phone number: ${to}`,
+    };
+  }
+
+  try {
+    const url = `https://api.ultramsg.com/${instanceId}/messages/image`;
+    const params = new URLSearchParams();
+    params.append('token', token);
+    params.append('to', cleanTo);
+    params.append('image', image);
+    if (caption) {
+      params.append('caption', caption);
+    }
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: params.toString(),
+    });
+
+    const data = await res.json();
+
+    if (data?.sent === 'true' || data?.sent === true || data?.id) {
+      return {
+        success: true,
+        messageId: String(data?.id || data?.message || 'sent'),
+        status: 'sent',
+      };
+    }
+
+    return {
+      success: false,
+      error: data?.error || data?.message || 'Failed to send WhatsApp image via gateway',
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || 'Network error calling WhatsApp Gateway',
+    };
+  }
+}
+

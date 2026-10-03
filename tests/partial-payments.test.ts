@@ -150,20 +150,40 @@ describe('Partial Payments & Bill Edit Tests', () => {
     expect(partialReceipt).toContain('400.00');
     expect(partialReceipt).toContain('600.00');
 
-    // 2. Full settlement receipt
-    const fullReceipt = buildWhatsAppThankYouText({
+    // 2. Full settlement receipt with 0 remaining balance across all bills
+    const fullReceiptZeroBalance = buildWhatsAppThankYouText({
       customerName: 'Boopathy',
       recipientPhone: '+919876543210',
       amountReceived: 600,
       totalBillAmount: 1000,
       remainingBalance: 0,
       isPartial: false,
+      totalOutstandingBalance: 0,
       pharmacyName: 'Revathi Medicals',
     });
 
-    expect(fullReceipt).toContain('PAYMENT RECEIVED (SETTLED)');
+    expect(fullReceiptZeroBalance).toContain('PAYMENT RECEIVED (ALL DUES CLEARED)');
+    expect(fullReceiptZeroBalance).toContain('All dues have been cleared!');
 
-    // 3. Partial reminder
+    // 3. Bill settled, BUT customer has another pending bill (reminds them of remaining balance!)
+    const settledWithOtherBills = buildWhatsAppThankYouText({
+      customerName: 'Boopathy',
+      recipientPhone: '+919876543210',
+      amountReceived: 600,
+      totalBillAmount: 600,
+      remainingBalance: 0,
+      isPartial: false,
+      totalOutstandingBalance: 1250,
+      otherPendingBillsCount: 2,
+      pharmacyName: 'Revathi Medicals',
+    });
+
+    expect(settledWithOtherBills).toContain('PAYMENT RECEIVED (BILL SETTLED)');
+    expect(settledWithOtherBills).toContain('Remaining Outstanding Balance');
+    expect(settledWithOtherBills).toContain('1,250.00');
+    expect(settledWithOtherBills).not.toContain('All dues have been cleared!');
+
+    // 4. Partial reminder
     const partialReminder = buildWhatsAppReminderText({
       customerName: 'Boopathy',
       recipientPhone: '+919876543210',
@@ -179,4 +199,26 @@ describe('Partial Payments & Bill Edit Tests', () => {
     expect(partialReminder).toContain('Already Paid');
     expect(partialReminder).toContain('Remaining Balance Due');
   });
+
+  it('correctly builds WhatsApp messages for stock arrival notifications', async () => {
+    const { buildWhatsAppStockArrivalText } = await import('../lib/whatsapp-share');
+
+    const arrivalMsg = buildWhatsAppStockArrivalText({
+      customerName: 'Kavitha',
+      recipientPhone: '+919876543210',
+      productName: 'Telma 40mg Tablet',
+      quantity: '2 Strips',
+      requestedDate: '2026-10-01',
+      notes: 'Urgent refill',
+      pharmacyName: 'Revathi Medicals',
+    });
+
+    expect(arrivalMsg).toContain('STOCK ARRIVAL NOTIFICATION');
+    expect(arrivalMsg).toContain('Telma 40mg Tablet');
+    expect(arrivalMsg).toContain('2 Strips');
+    expect(arrivalMsg).toContain('Urgent refill');
+    expect(arrivalMsg).toContain('IN STOCK');
+  });
+
 });
+

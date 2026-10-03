@@ -121,3 +121,45 @@ export interface DashboardStats {
   payments_received_today_count: number;
   payments_received_today_amount: number;
 }
+
+export type StockRequestStatus = 'REQUESTED' | 'ARRIVED' | 'NOTIFIED' | 'FULFILLED' | 'CANCELLED';
+
+export interface StockRequest {
+  id: string;
+  customer_id?: string | null;
+  customer_name: string;
+  whatsapp_number: string;
+  product_name: string;
+  quantity?: string | null;
+  notes?: string | null;
+  image_url?: string | null;
+  status: StockRequestStatus;
+  requested_date: string;
+  arrived_at?: string | null;
+  notified_at?: string | null;
+  whatsapp_status: WhatsAppStatus;
+  whatsapp_message_id?: string | null;
+  created_at: string;
+  updated_at: string;
+  customer?: Customer;
+}
+
+export interface CreateStockRequestInput {
+  customer_name: string;
+  whatsapp_number: string;
+  product_name: string;
+  quantity?: string;
+  notes?: string;
+  image_url?: string;
+}
+
+export interface UpdateStockRequestInput {
+  customer_name?: string;
+  whatsapp_number?: string;
+  product_name?: string;
+  quantity?: string;
+  notes?: string;
+  image_url?: string | null;
+  status?: StockRequestStatus;
+}
+
