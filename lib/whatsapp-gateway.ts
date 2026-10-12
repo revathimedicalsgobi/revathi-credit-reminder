@@ -78,7 +78,7 @@ export async function checkWhatsAppGatewayStatus(config?: WhatsAppGatewayConfig)
     const substatus = accountStatus.substatus || '';
 
     const isAuth = status === 'authenticated';
-    const isConn = substatus === 'connected' || isAuth;
+    const isConn = (substatus === 'connected' || isAuth) && !data?.error;
 
     return {
       connected: isConn,
@@ -86,6 +86,7 @@ export async function checkWhatsAppGatewayStatus(config?: WhatsAppGatewayConfig)
       status,
       substatus,
       instanceId,
+      error: data?.error || (isConn ? undefined : 'UltraMsg instance disconnected'),
     };
   } catch (err: any) {
     return {

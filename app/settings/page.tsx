@@ -9,6 +9,9 @@ import {
   MessageSquare,
   AlertCircle,
   CheckCircle2,
+  ExternalLink,
+  RefreshCw,
+  Send,
 } from 'lucide-react';
 import { PharmacySettings } from '@/lib/types';
 import { WhatsAppProviderStatus } from '@/lib/whatsapp/types';
@@ -261,15 +264,74 @@ export default function SettingsPage() {
 
         {/* WhatsApp Automated Gateway (UltraMsg) */}
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
             <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
               <MessageSquare className="w-4 h-4 text-emerald-600" />
               WhatsApp Automated Gateway (UltraMsg)
             </h2>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-              🟢 Connected (instance193144)
-            </span>
+            
+            {whatsappStatus?.statusText === 'Connected' ? (
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
+                <span>Connected ({whatsappStatus.phoneNumberId || 'instance193144'})</span>
+              </span>
+            ) : whatsappStatus?.message?.toLowerCase().includes('stopped') || whatsappStatus?.message?.toLowerCase().includes('non-payment') ? (
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-200 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-rose-600" />
+                <span>Stopped: Subscription Expired ({whatsappStatus?.phoneNumberId || 'instance193144'})</span>
+              </span>
+            ) : (
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-amber-600" />
+                <span>{whatsappStatus?.statusText || 'Checking Gateway...'}</span>
+              </span>
+            )}
           </div>
+
+          {/* Subscription Expired Alert Banner */}
+          {(whatsappStatus?.message?.toLowerCase().includes('stopped') || whatsappStatus?.message?.toLowerCase().includes('non-payment')) && (
+            <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl space-y-3 animate-in fade-in">
+              <div className="flex items-start gap-2.5 text-rose-900">
+                <AlertCircle className="w-5 h-5 text-rose-600 flex-shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-rose-900">
+                    UltraMsg Instance Stopped Due to Non-Payment
+                  </h3>
+                  <p className="text-xs text-rose-800 leading-relaxed">
+                    Your UltraMsg automated gateway subscription for <strong className="font-mono">instance193144</strong> has expired. UltraMsg halts automated API messaging until the instance plan is extended. Payment updates on UltraMsg every 5 minutes.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 pt-1">
+                <a
+                  href="https://ultramsg.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-lg text-xs font-bold shadow-sm transition-all"
+                >
+                  <span>Renew Subscription on UltraMsg.com</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const res = await fetch('/api/settings?t=' + Date.now());
+                    const data = await res.json();
+                    if (data?.whatsappStatus) {
+                      setWhatsappStatus(data.whatsappStatus);
+                      alert(data.whatsappStatus.statusText === 'Connected' ? '✅ UltraMsg is now active and connected!' : 'Status: ' + (data.whatsappStatus.message || 'Still stopped. Please allow 5 minutes after payment.'));
+                    }
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg text-xs font-bold transition-all"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Recheck Connection</span>
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/80 space-y-3">
             <div className="flex items-center justify-between text-xs">
@@ -291,55 +353,83 @@ export default function SettingsPage() {
               <label className="block text-xs font-bold text-slate-700">
                 📲 Send Live Test WhatsApp Message
               </label>
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <input
                   type="tel"
                   id="testPhoneInput"
-                  placeholder="Enter 10-digit WhatsApp phone (e.g. 9876543210)"
+                  placeholder="Enter 10-digit WhatsApp phone (e.g. 9698455732)"
                   className="flex-1 px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
                 />
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const input = document.getElementById('testPhoneInput') as HTMLInputElement;
-                    const phone = input?.value?.trim();
-                    if (!phone || phone.length < 10) {
-                      alert('Please enter a valid 10-digit phone number.');
-                      return;
-                    }
-
-                    const btn = document.getElementById('sendTestBtn') as HTMLButtonElement;
-                    if (btn) btn.disabled = true;
-
-                    try {
-                      const res = await fetch('/api/whatsapp/send', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          to: phone,
-                          message: `━━━━━━━━━━━━━━━━━━━━━━━\n🏥 *REVATHI MEDICALS & DISTRIBUTORS*\n✅ *WHATSAPP GATEWAY TEST SUCCESSFUL*\n━━━━━━━━━━━━━━━━━━━━━━━\n\nHello! This is a test message from your automated WhatsApp credit manager. Your UltraMsg Gateway (instance193144) is active and running perfectly!\n\nThank you! 🙏`,
-                        }),
-                      });
-                      const data = await res.json();
-                      if (res.ok && data.success) {
-                        alert('✅ Test message sent successfully! Check WhatsApp on ' + phone);
-                      } else {
-                        alert('❌ Failed: ' + (data.error || 'Check gateway connection'));
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const input = document.getElementById('testPhoneInput') as HTMLInputElement;
+                      const phone = input?.value?.trim();
+                      if (!phone || phone.replace(/[^\d]/g, '').length < 10) {
+                        alert('Please enter a valid 10-digit phone number.');
+                        return;
                       }
-                    } catch (e: any) {
-                      alert('Error: ' + e.message);
-                    } finally {
-                      if (btn) btn.disabled = false;
-                    }
-                  }}
-                  id="sendTestBtn"
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-colors disabled:opacity-50"
-                >
-                  Send Test
-                </button>
+
+                      const btn = document.getElementById('sendTestBtn') as HTMLButtonElement;
+                      if (btn) btn.disabled = true;
+
+                      try {
+                        const res = await fetch('/api/whatsapp/send', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            to: phone,
+                            message: `━━━━━━━━━━━━━━━━━━━━━━━\n🏥 *REVATHI MEDICALS & DISTRIBUTORS*\n✅ *WHATSAPP GATEWAY TEST SUCCESSFUL*\n━━━━━━━━━━━━━━━━━━━━━━━\n\nHello! This is a test message from your automated WhatsApp credit manager. Your UltraMsg Gateway (instance193144) is active and running perfectly!\n\nThank you! 🙏`,
+                          }),
+                        });
+                        const data = await res.json();
+                        if (res.ok && data.success) {
+                          alert('✅ Test message sent successfully! Check WhatsApp on ' + phone);
+                        } else {
+                          const err = data.error || 'Check gateway connection';
+                          if (err.toLowerCase().includes('stopped') || err.toLowerCase().includes('non-payment')) {
+                            alert('❌ UltraMsg Instance Stopped: Your subscription has expired on UltraMsg.com.\n\nYou can renew your subscription at ultramsg.com, or use the "Open in WhatsApp Web" button next to this to send messages for free!');
+                          } else {
+                            alert('❌ Failed: ' + err);
+                          }
+                        }
+                      } catch (e: any) {
+                        alert('Error: ' + e.message);
+                      } finally {
+                        if (btn) btn.disabled = false;
+                      }
+                    }}
+                    id="sendTestBtn"
+                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-colors disabled:opacity-50 inline-flex items-center gap-1.5"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Send Test (UltraMsg)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const input = document.getElementById('testPhoneInput') as HTMLInputElement;
+                      const phone = input?.value?.trim();
+                      if (!phone || phone.replace(/[^\d]/g, '').length < 10) {
+                        alert('Please enter a valid 10-digit phone number.');
+                        return;
+                      }
+                      const cleanPhone = phone.replace(/[^\d]/g, '').slice(-10);
+                      const text = encodeURIComponent(`━━━━━━━━━━━━━━━━━━━━━━━\n🏥 *REVATHI MEDICALS & DISTRIBUTORS*\n✅ *WHATSAPP TEST MESSAGE*\n━━━━━━━━━━━━━━━━━━━━━━━\n\nHello! This is a test message from Revathi Medicals. WhatsApp messaging is working! 🙏`);
+                      window.open(`https://wa.me/91${cleanPhone}?text=${text}`, '_blank');
+                    }}
+                    className="px-3.5 py-2 bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 text-xs font-bold rounded-xl transition-colors inline-flex items-center gap-1.5"
+                    title="100% Free fallback via WhatsApp Web or WhatsApp Business app"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5 text-teal-600" />
+                    <span>Open in WhatsApp Web (Free)</span>
+                  </button>
+                </div>
               </div>
               <span className="text-[11px] text-slate-400 block">
-                Sends an instant test message to verify direct automated WhatsApp delivery.
+                UltraMsg sends automated messages in the background. WhatsApp Web is 100% free with zero monthly subscription cost.
               </span>
             </div>
           </div>
