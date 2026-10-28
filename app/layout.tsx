@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { Navbar } from '@/components/Navbar';
+import { AIAssistantModal } from '@/components/AIAssistantModal';
 
 export const metadata: Metadata = {
   title: 'Purchase Summary & Payment Follow-up Manager',
@@ -19,6 +20,7 @@ export default function RootLayout({
         <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
           {children}
         </main>
+        <AIAssistantModal />
         <footer className="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-400 no-print">
           <p>© {new Date().getFullYear()} Purchase Summary & Payment Follow-up Manager. All rights reserved.</p>
         </footer>

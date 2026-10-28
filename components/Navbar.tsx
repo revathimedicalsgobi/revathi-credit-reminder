@@ -14,6 +14,7 @@ import {
   Boxes,
   Menu,
   X,
+  Sparkles,
 } from 'lucide-react';
 
 import { createClient } from '@/lib/supabase/client';
@@ -146,6 +147,19 @@ export function Navbar() {
 
           {/* Right Action Buttons */}
           <div className="flex items-center space-x-2 sm:space-x-3">
+            <button
+              onClick={() => {
+                if (typeof window !== 'undefined') {
+                  window.dispatchEvent(new CustomEvent('open-ai-assistant'));
+                }
+              }}
+              className="flex items-center space-x-1 sm:space-x-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 bg-gradient-to-r from-emerald-50 to-teal-50 hover:from-emerald-100 hover:to-teal-100 border border-emerald-300 text-emerald-800 rounded-lg text-xs sm:text-sm font-bold shadow-sm transition-all"
+              title="Open AI Assistant"
+            >
+              <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-600 animate-pulse" />
+              <span>AI</span>
+            </button>
+
             <Link
               href="/purchases/new"
               className="flex items-center space-x-1.5 sm:space-x-2 px-3 sm:px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-lg text-xs sm:text-sm font-semibold shadow-sm shadow-emerald-600/30 transition-all transform hover:-translate-y-0.5 active:translate-y-0"
@@ -252,6 +266,19 @@ export function Navbar() {
               <SettingsIcon className="w-4 h-4 text-slate-500" />
               <span>Settings & Branding</span>
             </Link>
+
+            <button
+              onClick={() => {
+                setIsMobileMenuOpen(false);
+                if (typeof window !== 'undefined') {
+                  window.dispatchEvent(new CustomEvent('open-ai-assistant'));
+                }
+              }}
+              className="w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-sm font-bold text-emerald-900 bg-gradient-to-r from-emerald-100 to-teal-100 border border-emerald-300 shadow-sm"
+            >
+              <Sparkles className="w-4 h-4 text-emerald-600 animate-pulse" />
+              <span>🎙️ AI வாய்ஸ் அசிஸ்டன்ட்</span>
+            </button>
 
             <Link
               href="/purchases/new"
