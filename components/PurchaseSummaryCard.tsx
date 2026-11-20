@@ -404,30 +404,49 @@ export function PurchaseSummaryCard({
             </div>
           )}
 
-          {previousBalance > 0 && (
-            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl space-y-2">
-              <div className="flex items-center justify-between text-xs font-bold text-rose-900">
-                <span>🔴 Previous Unpaid Credit Balance:</span>
-                <span>{formatINR(previousBalance)}</span>
-              </div>
-              <div className="flex items-center justify-between text-xs text-slate-700">
-                <span>➕ Current Sale {paidAmount > 0 ? 'Pending Balance' : 'Bill'}:</span>
-                <span className="font-bold">{formatINR(balanceDue !== undefined ? balanceDue : Math.max(0, amountPayable - paidAmount))}</span>
-              </div>
-            </div>
-          )}
-
-          <div className={`border-3 ${previousBalance > 0 ? 'border-rose-600 bg-gradient-to-br from-rose-50 via-amber-50/50 to-rose-100/70' : paidAmount > 0 ? 'border-orange-500 bg-gradient-to-br from-orange-50 via-amber-50/60 to-orange-100/70' : 'border-emerald-600 bg-gradient-to-br from-emerald-50 via-teal-50/60 to-emerald-100/70'} rounded-2xl p-5 text-center shadow-md`}>
-            <span className={`text-xs sm:text-sm font-black uppercase tracking-widest ${previousBalance > 0 ? 'text-rose-900' : paidAmount > 0 ? 'text-orange-950' : 'text-emerald-900'} block`}>
-              {previousBalance > 0 ? 'TOTAL CUMULATIVE AMOUNT DUE' : paidAmount > 0 ? 'REMAINING BALANCE DUE' : 'GRAND TOTAL'}
+          {/* MAIN PROMINENT BOX: THIS BILL AMOUNT (CURRENT SALE VALUE) */}
+          <div className="border-3 border-emerald-600 bg-gradient-to-br from-emerald-50 via-teal-50/60 to-emerald-100/70 rounded-2xl p-5 text-center shadow-md">
+            <span className="text-xs sm:text-sm font-black uppercase tracking-widest text-emerald-900 block">
+              {paidAmount > 0 ? 'CURRENT BILL BALANCE DUE' : 'CURRENT BILL TOTAL'}
             </span>
-            <div className={`text-3xl sm:text-4xl font-black ${previousBalance > 0 ? 'text-rose-700' : paidAmount > 0 ? 'text-orange-800' : 'text-emerald-800'} tracking-tight my-1`}>
-              {formatINR(previousBalance > 0 ? (cumulativeTotal || (previousBalance + (balanceDue !== undefined ? balanceDue : amountPayable))) : (balanceDue !== undefined && paidAmount > 0 ? balanceDue : amountPayable))}
+            <div className="text-3xl sm:text-4xl font-black text-emerald-800 tracking-tight my-1">
+              {formatINR(balanceDue !== undefined && paidAmount > 0 ? balanceDue : amountPayable)}
             </div>
             <p className="text-xs sm:text-sm font-bold text-slate-700 italic">
-              {numberToIndianRupeeWords(previousBalance > 0 ? (cumulativeTotal || (previousBalance + (balanceDue !== undefined ? balanceDue : amountPayable))) : (balanceDue !== undefined && paidAmount > 0 ? balanceDue : amountPayable))}
+              {numberToIndianRupeeWords(balanceDue !== undefined && paidAmount > 0 ? balanceDue : amountPayable)}
             </p>
           </div>
+
+          {/* SMALLER CUMULATIVE BALANCE BOX BELOW THE MAIN BILL */}
+          {previousBalance > 0 && (
+            <div className="p-4 bg-gradient-to-br from-rose-50 to-amber-50/60 border-2 border-rose-300 rounded-2xl space-y-2 text-xs">
+              <div className="flex items-center justify-between font-bold text-slate-700 border-b border-rose-200/60 pb-2">
+                <span className="text-rose-900 font-extrabold uppercase tracking-wide text-[11px]">
+                  📋 Account Cumulative Balance
+                </span>
+                <span className="text-rose-700 font-black text-xs sm:text-sm">
+                  Total: {formatINR(cumulativeTotal || (previousBalance + (balanceDue !== undefined ? balanceDue : amountPayable)))}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-rose-800 font-medium">
+                <span>• Previous Unpaid Credit:</span>
+                <span className="font-bold">{formatINR(previousBalance)}</span>
+              </div>
+              <div className="flex items-center justify-between text-slate-700">
+                <span>• This Sale Bill {paidAmount > 0 ? 'Balance' : 'Amount'}:</span>
+                <span className="font-bold">{formatINR(balanceDue !== undefined ? balanceDue : Math.max(0, amountPayable - paidAmount))}</span>
+              </div>
+              <div className="flex items-center justify-between text-rose-950 font-black pt-1.5 border-t border-rose-200">
+                <span className="text-xs uppercase">🔴 TOTAL CUMULATIVE AMOUNT DUE:</span>
+                <span className="text-sm sm:text-base font-black text-rose-700">
+                  {formatINR(cumulativeTotal || (previousBalance + (balanceDue !== undefined ? balanceDue : amountPayable)))}
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-500 italic text-right font-medium">
+                {numberToIndianRupeeWords(cumulativeTotal || (previousBalance + (balanceDue !== undefined ? balanceDue : amountPayable)))}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Large Scanable UPI QR Code Section */}

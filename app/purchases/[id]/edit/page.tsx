@@ -526,12 +526,30 @@ function EditPurchaseContent() {
                           />
                         </div>
 
-                        {/* Discount (%) */}
+                        {/* Discount (%) with Dropdown Presets (10%, 15%, 20%) & Manual Input */}
                         <div className="col-span-4 sm:col-span-2">
-                          <label className="block text-[11px] font-semibold text-slate-600 mb-1 flex items-center gap-1">
-                            <span>Discount</span>
-                            <span className="text-rose-600 font-bold">(%)</span>
-                          </label>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="block text-[11px] font-semibold text-slate-600 flex items-center gap-0.5">
+                              <span>Disc</span>
+                              <span className="text-rose-600 font-bold">(%)</span>
+                            </label>
+                            <select
+                              value={['0', '10', '15', '20'].includes(String(item.discount)) ? String(item.discount) : 'custom'}
+                              onChange={(e) => {
+                                if (e.target.value !== 'custom') {
+                                  handleItemChange(item.id, 'discount', e.target.value);
+                                }
+                              }}
+                              className="text-[10px] font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded px-1 py-0.5 cursor-pointer focus:outline-none"
+                              title="Choose quick preset: 10%, 15%, 20% or type manually"
+                            >
+                              <option value="custom">Custom</option>
+                              <option value="0">0%</option>
+                              <option value="10">10%</option>
+                              <option value="15">15%</option>
+                              <option value="20">20%</option>
+                            </select>
+                          </div>
                           <div className="relative">
                             <input
                               type="number"
