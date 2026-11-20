@@ -22,6 +22,7 @@ import { isValidWhatsAppNumber, normalizeWhatsAppNumber } from '@/lib/validation
 import { maskWhatsAppNumber } from '@/lib/utils';
 import { PurchaseSummaryCard } from '@/components/PurchaseSummaryCard';
 import { MedicineNameScannerModal, ScannerMode } from '@/components/MedicineNameScannerModal';
+import { VoiceBillingBar } from '@/components/VoiceBillingBar';
 import { Purchase } from '@/lib/types';
 
 interface ItemRow {
@@ -49,6 +50,7 @@ function EditPurchaseContent() {
   const [purchaseDate, setPurchaseDate] = useState('');
   const [sendWhatsApp, setSendWhatsApp] = useState(false);
   const [items, setItems] = useState<ItemRow[]>([]);
+  const [activeRowIndex, setActiveRowIndex] = useState(0);
   const [paidAmount, setPaidAmount] = useState<number>(0);
 
   // UI state
@@ -421,7 +423,7 @@ function EditPurchaseContent() {
               </div>
             </div>
 
-            {/* 2. Purchase Items Section */}
+            {/* 2. Bill Items Section */}
             <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
@@ -439,6 +441,15 @@ function EditPurchaseContent() {
                 </button>
               </div>
 
+              {/* Hands-Free Voice Billing Assistant */}
+              <VoiceBillingBar
+                items={items}
+                activeRowIndex={activeRowIndex}
+                setActiveRowIndex={setActiveRowIndex}
+                onUpdateField={handleItemChange}
+                onAddRow={handleAddItem}
+              />
+
               {/* Items List */}
               <div className="space-y-3">
                 {items.map((item, index) => {
@@ -448,11 +459,17 @@ function EditPurchaseContent() {
                   const itemGross = qty * mrp;
                   const itemDiscountAmt = Math.round((itemGross * (discPercent / 100)) * 100) / 100;
                   const itemNet = Math.max(0, itemGross - itemDiscountAmt);
+                  const isActiveVoiceRow = index === activeRowIndex;
 
                   return (
                     <div
                       key={item.id}
-                      className="p-3 sm:p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3 transition-all hover:border-emerald-200"
+                      onClick={() => setActiveRowIndex(index)}
+                      className={`p-3 sm:p-4 rounded-xl border transition-all ${
+                        isActiveVoiceRow
+                          ? 'border-emerald-400 bg-emerald-50/20 shadow-xs ring-2 ring-emerald-500/20'
+                          : 'border-slate-200 bg-slate-50/50 hover:border-slate-300'
+                      } space-y-3`}
                     >
                       <div className="grid grid-cols-12 gap-3 items-center">
                         {/* Item Name */}

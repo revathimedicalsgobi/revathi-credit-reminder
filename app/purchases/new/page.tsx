@@ -30,6 +30,7 @@ import { PurchaseSummaryCard } from '@/components/PurchaseSummaryCard';
 import { ProcessPurchaseModal } from '@/components/ProcessPurchaseModal';
 import { MedicineNameScannerModal, ScannerMode } from '@/components/MedicineNameScannerModal';
 import { CustomerSearchDropdown } from '@/components/CustomerSearchDropdown';
+import { VoiceBillingBar } from '@/components/VoiceBillingBar';
 
 interface ItemRow {
   id: string;
@@ -79,6 +80,7 @@ function NewPurchaseContent() {
   const [items, setItems] = useState<ItemRow[]>([
     { id: 'item_initial_1', itemName: '', quantity: '1', mrp: '', discount: '0' },
   ]);
+  const [activeRowIndex, setActiveRowIndex] = useState(0);
 
   // UI state
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -609,6 +611,15 @@ function NewPurchaseContent() {
                 </button>
               </div>
 
+              {/* Hands-Free Voice Billing Assistant */}
+              <VoiceBillingBar
+                items={items}
+                activeRowIndex={activeRowIndex}
+                setActiveRowIndex={setActiveRowIndex}
+                onUpdateField={handleItemChange}
+                onAddRow={handleAddItem}
+              />
+
               {/* Items List */}
               <div className="space-y-3">
                 {items.map((item, index) => {
@@ -618,11 +629,17 @@ function NewPurchaseContent() {
                   const itemGross = qty * mrp;
                   const itemDiscountAmt = Math.round((itemGross * (discPercent / 100)) * 100) / 100;
                   const itemNet = Math.max(0, itemGross - itemDiscountAmt);
+                  const isActiveVoiceRow = index === activeRowIndex;
 
                   return (
                     <div
                       key={item.id}
-                      className="p-3 sm:p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3 transition-all hover:border-emerald-200"
+                      onClick={() => setActiveRowIndex(index)}
+                      className={`p-3 sm:p-4 rounded-xl border transition-all ${
+                        isActiveVoiceRow
+                          ? 'border-emerald-400 bg-emerald-50/20 shadow-xs ring-2 ring-emerald-500/20'
+                          : 'border-slate-200 bg-slate-50/50 hover:border-slate-300'
+                      } space-y-3`}
                     >
                       <div className="grid grid-cols-12 gap-3 items-center">
                         {/* Item Name */}
