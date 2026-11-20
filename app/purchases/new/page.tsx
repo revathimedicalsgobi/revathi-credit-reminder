@@ -461,27 +461,39 @@ function NewPurchaseContent() {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'An error occurred while creating purchase.';
       setFormError(msg);
+      throw err;
     } finally {
       setIsProcessing(false);
     }
   };
 
   // Process purchase triggered directly by conversational voice assistant ("Yes" / "ஆம்")
-  const handleProcessPurchaseFromVoice = async () => {
+  const handleProcessPurchaseFromVoice = async (): Promise<{ success: boolean; error?: string }> => {
+    setFormError(null);
     if (!customerName.trim()) {
-      setFormError('Please enter or speak customer name.');
-      return;
+      const err = 'Customer name is missing. Please enter or speak customer name.';
+      setFormError(err);
+      return { success: false, error: err };
     }
     if (!isValidWhatsAppNumber(whatsappNumber)) {
-      setFormError('Please enter a valid 10-digit WhatsApp number.');
-      return;
+      const err = 'Please enter a valid 10-digit WhatsApp number (e.g. 9876543210).';
+      setFormError(err);
+      return { success: false, error: err };
     }
     const validItems = items.filter((it) => it.itemName.trim() && Number(it.mrp) > 0);
     if (validItems.length === 0) {
-      setFormError('Please add at least one item with a valid name and MRP.');
-      return;
+      const err = 'Please add at least one item with a valid name and MRP.';
+      setFormError(err);
+      return { success: false, error: err };
     }
-    await handleProcessPurchase();
+    try {
+      await handleProcessPurchase();
+      return { success: true };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Failed to process purchase';
+      setFormError(msg);
+      return { success: false, error: msg };
+    }
   };
 
   return (

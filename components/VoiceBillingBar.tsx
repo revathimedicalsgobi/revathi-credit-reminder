@@ -668,18 +668,24 @@ export function VoiceBillingBar({
       if (stage === 'ASK_CONFIRM_PROCESS') {
         if (isProcessYes(clean)) {
           // User said "Yes" / "Process" / "ஆம்"
-          setLastFeedback(`✓ Processing Bill...`);
           stopVoiceSession();
+          setLastFeedback(`⏳ Processing and saving bill now...`);
 
-          const prompt =
-            voiceLang === 'ta-IN'
-              ? `பில் செயலாக்கப்படுகிறது. நன்றி!`
-              : `Processing bill now. Thank you!`;
-          speakAssistant(prompt, () => {
-            if (onConfirmProcess) {
-              onConfirmProcess();
+          // Execute onConfirmProcess IMMEDIATELY!
+          if (onConfirmProcess) {
+            try {
+              const res: any = await onConfirmProcess();
+              if (res && res.success === false) {
+                // There was a validation error (e.g. missing mobile number)
+                setLastFeedback(`⚠️ ${res.error || 'Cannot process bill'}`);
+                return;
+              }
+              setLastFeedback(`✓ Bill Processed Successfully! Redirecting...`);
+            } catch (err: unknown) {
+              const msg = err instanceof Error ? err.message : 'Failed to process purchase';
+              setLastFeedback(`❌ ${msg}`);
             }
-          });
+          }
           return;
         }
 
@@ -1001,6 +1007,47 @@ export function VoiceBillingBar({
             </p>
           )}
         </div>
+
+        {/* Stage 7 Confirmation Buttons: Speak "Yes" or Click */}
+        {voiceStage === 'ASK_CONFIRM_PROCESS' && (
+          <div className="flex items-center gap-2 pt-1 flex-wrap animate-in fade-in">
+            <button
+              type="button"
+              onClick={async () => {
+                stopVoiceSession();
+                setLastFeedback('⏳ Processing and saving bill now...');
+                if (onConfirmProcess) {
+                  try {
+                    const res: any = await onConfirmProcess();
+                    if (res && res.success === false) {
+                      setLastFeedback(`⚠️ ${res.error || 'Cannot process bill'}`);
+                      return;
+                    }
+                    setLastFeedback('✓ Bill Processed Successfully! Redirecting...');
+                  } catch (err: unknown) {
+                    const msg = err instanceof Error ? err.message : 'Failed to process purchase';
+                    setLastFeedback(`❌ ${msg}`);
+                  }
+                }
+              }}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-md transition-all active:scale-95 cursor-pointer"
+            >
+              <CheckCircle2 className="w-4 h-4 text-slate-950" />
+              <span>Confirm & Process Bill Now (Say &quot;Yes&quot;)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setLastFeedback('✓ Waiting for manual review');
+                stopVoiceSession();
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-white/10 hover:bg-white/20 text-slate-300 transition-all cursor-pointer"
+            >
+              <span>Review Manually (Say &quot;No&quot;)</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Guided Step Shortcuts */}
