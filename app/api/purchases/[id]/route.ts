@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { UpdatePurchaseSchema, normalizeWhatsAppNumber } from '@/lib/validations';
 import { calculatePurchaseSummary, roundToTwoDecimals } from '@/lib/calculations';
-import { enrichPurchaseWithPayments } from '@/lib/payment-helpers';
+import { enrichPurchaseWithPayments, buildChronologicalBillNumberMap } from '@/lib/payment-helpers';
 import { getWhatsAppProvider } from '@/lib/whatsapp';
 
 export const dynamic = 'force-dynamic';
@@ -36,8 +36,22 @@ export async function GET(
       return NextResponse.json({ error: 'Purchase not found' }, { status: 404 });
     }
 
+    // Fetch chronological list of all purchases to map continuous series numbers
+    const { data: allPurchasesRef } = await supabase
+      .from('purchases')
+      .select('id, created_at, purchase_date, bill_number')
+      .order('created_at', { ascending: true });
+
+    const { data: allBillLogs } = await supabase
+      .from('audit_logs')
+      .select('id, purchase_id, new_status, notes')
+      .eq('new_status', 'BILL_NUMBER');
+
+    const billNumberMap = buildChronologicalBillNumberMap(allPurchasesRef || [], allBillLogs || []);
+    const resolvedBillNo = billNumberMap.get(purchase.id);
+
     // Enrich purchase with computed partial payment details and history
-    const enrichedPurchase = enrichPurchaseWithPayments(purchase, purchase.audit_logs || []);
+    const enrichedPurchase = enrichPurchaseWithPayments(purchase, purchase.audit_logs || [], resolvedBillNo);
 
     let previousPendingPurchases: Array<{ id: string; purchase_date: string; amount_payable: number; balance_due?: number }> = [];
     let previousBalance = 0;

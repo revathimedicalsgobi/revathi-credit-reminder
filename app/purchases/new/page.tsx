@@ -66,7 +66,7 @@ function NewPurchaseContent() {
   const customerDropdownRef = useRef<HTMLDivElement>(null);
 
   // Customer Form State
-  const [billNumber, setBillNumber] = useState<string>(() => generateNewBillNumber());
+  const [billNumber, setBillNumber] = useState<string>('BILL-0001');
   const [customerName, setCustomerName] = useState(searchParams.get('name') || '');
   const [whatsappNumber, setWhatsappNumber] = useState(searchParams.get('phone') || '');
   const [sendWhatsApp, setSendWhatsApp] = useState(true);
@@ -304,6 +304,16 @@ function NewPurchaseContent() {
         }
       })
       .catch((err) => console.error('Failed to load settings in new purchase page:', err));
+
+    // Auto-fetch continuous ascending series bill number
+    fetch('/api/purchases/next-bill-number?t=' + Date.now(), { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.nextBillNumber) {
+          setBillNumber(data.nextBillNumber);
+        }
+      })
+      .catch((err) => console.warn('Failed to load next bill number:', err));
   }, []);
 
   // Real-time calculation engine with Round-off
@@ -463,16 +473,25 @@ function NewPurchaseContent() {
                   <span>Bill / Invoice No.</span>
                   <button
                     type="button"
-                    onClick={() => setBillNumber(generateNewBillNumber())}
+                    onClick={async () => {
+                      try {
+                        const res = await fetch('/api/purchases/next-bill-number?t=' + Date.now());
+                        const data = await res.json();
+                        if (data?.nextBillNumber) setBillNumber(data.nextBillNumber);
+                      } catch {
+                        setBillNumber('BILL-0001');
+                      }
+                    }}
                     className="text-[10px] text-emerald-600 hover:text-emerald-700 font-bold hover:underline"
+                    title="Fetch next continuous sequential series number"
                   >
-                    ↺ Auto-generate
+                    ↺ Next Series No
                   </button>
                 </label>
                 <div className="relative">
                   <input
                     type="text"
-                    placeholder="e.g. BILL-2611-1042"
+                    placeholder="e.g. BILL-0001"
                     value={billNumber}
                     onChange={(e) => setBillNumber(e.target.value)}
                     className="w-full px-3 py-2 text-xs font-mono font-bold rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white text-slate-900"

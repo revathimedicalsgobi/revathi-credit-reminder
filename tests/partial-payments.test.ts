@@ -229,9 +229,12 @@ describe('Partial Payments & Bill Edit Tests', () => {
   });
 
   it('correctly generates, validates, and resolves Bill Numbers and Receipt Numbers', () => {
-    // 1. Bill number generation
-    const billNo = generateNewBillNumber('BILL');
-    expect(billNo).toMatch(/^BILL-\d{4}-\d{4}$/);
+    // 1. Bill number series generation
+    const billNo1 = generateNewBillNumber(1, 'BILL');
+    expect(billNo1).toBe('BILL-0001');
+
+    const billNo49 = generateNewBillNumber(49, 'BILL');
+    expect(billNo49).toBe('BILL-0049');
 
     // 2. Custom bill number in CreatePurchaseSchema
     const createdWithBill = CreatePurchaseSchema.safeParse({

@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { CreatePurchaseSchema, normalizeWhatsAppNumber } from '@/lib/validations';
 import { calculatePurchaseSummary } from '@/lib/calculations';
-import { computePurchasePaymentDetails, enrichPurchaseWithPayments, generateNewBillNumber } from '@/lib/payment-helpers';
+import {
+  computePurchasePaymentDetails,
+  enrichPurchaseWithPayments,
+  buildChronologicalBillNumberMap,
+  getNextSeriesBillNumberFromList,
+} from '@/lib/payment-helpers';
 import { getWhatsAppProvider } from '@/lib/whatsapp';
 
 export const dynamic = 'force-dynamic';
@@ -39,9 +44,23 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Enrich with computed partial payments and bill number
+    // 1. Fetch chronological list of all purchases to map continuous series numbers (BILL-0001 ... BILL-0048)
+    const { data: allPurchasesRef } = await supabase
+      .from('purchases')
+      .select('id, created_at, purchase_date, bill_number')
+      .order('created_at', { ascending: true });
+
+    const { data: allBillLogs } = await supabase
+      .from('audit_logs')
+      .select('id, purchase_id, new_status, notes')
+      .eq('new_status', 'BILL_NUMBER');
+
+    const billNumberMap = buildChronologicalBillNumberMap(allPurchasesRef || [], allBillLogs || []);
+
+    // Enrich with computed partial payments and chronological series bill number
     const enrichedPurchases = (purchases || []).map((p) => {
-      return enrichPurchaseWithPayments(p as any, p.audit_logs || []);
+      const assignedBillNo = billNumberMap.get(p.id);
+      return enrichPurchaseWithPayments(p as any, p.audit_logs || [], assignedBillNo);
     });
 
     let filtered = enrichedPurchases;
@@ -97,7 +116,22 @@ export async function POST(request: NextRequest) {
 
     const { customer_name, whatsapp_number, items, send_whatsapp, bill_number: inputBillNumber } = validationResult.data;
     const normalizedPhone = normalizeWhatsAppNumber(whatsapp_number);
-    const effectiveBillNumber = (inputBillNumber && inputBillNumber.trim()) || generateNewBillNumber();
+
+    let effectiveBillNumber = inputBillNumber && inputBillNumber.trim();
+    if (!effectiveBillNumber) {
+      // Determine next continuous ascending series number from existing purchases
+      const { data: allPurchasesRef } = await supabase
+        .from('purchases')
+        .select('id, created_at, bill_number')
+        .order('created_at', { ascending: true });
+
+      const { data: allBillLogs } = await supabase
+        .from('audit_logs')
+        .select('id, purchase_id, new_status, notes')
+        .eq('new_status', 'BILL_NUMBER');
+
+      effectiveBillNumber = getNextSeriesBillNumberFromList(allPurchasesRef || [], allBillLogs || []);
+    }
 
     const calculated = calculatePurchaseSummary(items);
     if (calculated.items.length === 0) {

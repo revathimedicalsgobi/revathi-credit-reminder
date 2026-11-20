@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { normalizeWhatsAppNumber } from '@/lib/validations';
-import { computePurchasePaymentDetails, getOrGenerateBillNumber } from '@/lib/payment-helpers';
+import { computePurchasePaymentDetails, getOrGenerateBillNumber, buildChronologicalBillNumberMap } from '@/lib/payment-helpers';
 import { roundToTwoDecimals } from '@/lib/calculations';
 
 export const dynamic = 'force-dynamic';
@@ -42,7 +42,20 @@ export async function GET(
       return NextResponse.json({ error: purchErr.message }, { status: 500 });
     }
 
-    // 3. Compute ledger statement aggregates with partial payments
+    // 3. Fetch chronological list of all purchases to map continuous series numbers
+    const { data: allPurchasesRef } = await supabase
+      .from('purchases')
+      .select('id, created_at, purchase_date, bill_number')
+      .order('created_at', { ascending: true });
+
+    const { data: allBillLogs } = await supabase
+      .from('audit_logs')
+      .select('id, purchase_id, new_status, notes')
+      .eq('new_status', 'BILL_NUMBER');
+
+    const billNumberMap = buildChronologicalBillNumberMap(allPurchasesRef || [], allBillLogs || []);
+
+    // 4. Compute ledger statement aggregates with partial payments
     let totalGross = 0;
     let totalDiscount = 0;
     let totalBilled = 0;
@@ -69,9 +82,11 @@ export async function GET(
         pendingBillsCount += 1;
       }
 
+      const assignedBillNo = billNumberMap.get(p.id) || getOrGenerateBillNumber(p, p.audit_logs || []);
+
       return {
         ...p,
-        bill_number: getOrGenerateBillNumber(p, p.audit_logs || []),
+        bill_number: assignedBillNo,
         paid_amount: details.paid_amount,
         balance_due: details.balance_due,
         payment_status: details.payment_status,

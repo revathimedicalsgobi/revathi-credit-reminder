@@ -2,26 +2,158 @@ import { Purchase, PaymentRecord, PaymentStatus, AuditLog } from './types';
 import { roundToTwoDecimals } from './calculations';
 
 /**
- * Generates a clean default Bill Number for a new or existing purchase
+ * Formats a sequential number into a standard ascending series bill number, e.g. BILL-0001, BILL-0049
  */
-export function generateNewBillNumber(customPrefix = 'BILL'): string {
-  const now = new Date();
-  const year = now.getFullYear().toString().slice(2);
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-  return `${customPrefix}-${year}${month}-${randomSuffix}`;
+export function formatSeriesBillNumber(sequence: number, prefix: string = 'BILL'): string {
+  const safeSeq = Math.max(1, Math.floor(sequence || 1));
+  const padded = String(safeSeq).padStart(4, '0');
+  return `${prefix}-${padded}`;
+}
+
+/**
+ * Extracts sequence integer from a bill number string (e.g. "BILL-0048" -> 48, "INV-102" -> 102)
+ */
+export function extractBillSequenceNumber(billNumber?: string | null): number | null {
+  if (!billNumber || typeof billNumber !== 'string') return null;
+  const match = billNumber.match(/(\d+)$/);
+  if (match) {
+    const num = parseInt(match[1], 10);
+    return isNaN(num) ? null : num;
+  }
+  return null;
+}
+
+/**
+ * Generates an ascending continuous series bill number (e.g. BILL-0001, BILL-0049)
+ */
+export function generateNewBillNumber(sequenceOrPrefix: number | string = 1, prefix = 'BILL'): string {
+  if (typeof sequenceOrPrefix === 'number') {
+    return formatSeriesBillNumber(sequenceOrPrefix, prefix);
+  }
+  // If string passed, check if it's a numeric string or a prefix
+  const parsed = parseInt(sequenceOrPrefix, 10);
+  if (!isNaN(parsed) && String(parsed) === sequenceOrPrefix.trim()) {
+    return formatSeriesBillNumber(parsed, prefix);
+  }
+  const customPrefix = sequenceOrPrefix.trim() || 'BILL';
+  return formatSeriesBillNumber(1, customPrefix);
+}
+
+/**
+ * Determines the next continuous ascending bill number given a list of existing purchases and audit logs
+ */
+export function getNextSeriesBillNumberFromList(
+  purchases: Array<{ id?: string; bill_number?: string | null }>,
+  auditLogs?: Array<{ id?: string; purchase_id?: string; new_status?: string | null; notes?: string | null }> | AuditLog[],
+  prefix: string = 'BILL'
+): string {
+  const count = purchases ? purchases.length : 0;
+  let maxSeq = count;
+
+  if (purchases && purchases.length > 0) {
+    for (const p of purchases) {
+      if (p.bill_number) {
+        const num = extractBillSequenceNumber(p.bill_number);
+        if (num !== null && num > maxSeq) {
+          maxSeq = num;
+        }
+      }
+    }
+  }
+
+  if (auditLogs && auditLogs.length > 0) {
+    for (const log of auditLogs) {
+      if (log.notes) {
+        let candidate: string | null = null;
+        if (log.new_status === 'BILL_NUMBER') {
+          candidate = log.notes.replace(/^BILL_NUMBER:\s*/i, '').trim();
+        } else if (log.notes.trim().startsWith('{')) {
+          try {
+            const parsed = JSON.parse(log.notes);
+            if (parsed.bill_number) candidate = String(parsed.bill_number).trim();
+          } catch {}
+        }
+        if (candidate) {
+          const num = extractBillSequenceNumber(candidate);
+          if (num !== null && num > maxSeq) {
+            maxSeq = num;
+          }
+        }
+      }
+    }
+  }
+
+  const nextSeq = maxSeq + 1;
+  return formatSeriesBillNumber(nextSeq, prefix);
+}
+
+/**
+ * Builds a chronological map mapping purchase ID -> sequential series number (e.g. BILL-0001, BILL-0002)
+ */
+export function buildChronologicalBillNumberMap(
+  allPurchases: Array<{ id: string; created_at?: string; purchase_date?: string; bill_number?: string | null }>,
+  auditLogs?: Array<{ id?: string; purchase_id?: string; new_status?: string | null; notes?: string | null }> | AuditLog[],
+  prefix: string = 'BILL'
+): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!allPurchases || allPurchases.length === 0) return map;
+
+  // Sort ascending by creation time to establish canonical chronological order
+  const sorted = [...allPurchases].sort((a, b) => {
+    const timeA = new Date(a.created_at || a.purchase_date || 0).getTime();
+    const timeB = new Date(b.created_at || b.purchase_date || 0).getTime();
+    return timeA - timeB;
+  });
+
+  sorted.forEach((p, index) => {
+    // 1. Direct bill_number
+    if (p.bill_number && p.bill_number.trim()) {
+      map.set(p.id, p.bill_number.trim());
+      return;
+    }
+
+    // 2. Audit logs override
+    if (auditLogs && auditLogs.length > 0) {
+      for (const log of auditLogs) {
+        if (log.purchase_id === p.id) {
+          if (log.new_status === 'BILL_NUMBER' && log.notes) {
+            const trimmed = log.notes.replace(/^BILL_NUMBER:\s*/i, '').trim();
+            if (trimmed) {
+              map.set(p.id, trimmed);
+              return;
+            }
+          }
+          if (log.notes && log.notes.trim().startsWith('{')) {
+            try {
+              const parsed = JSON.parse(log.notes);
+              if (parsed.bill_number && String(parsed.bill_number).trim()) {
+                map.set(p.id, String(parsed.bill_number).trim());
+                return;
+              }
+            } catch {}
+          }
+        }
+      }
+    }
+
+    // 3. Sequential ascending series number (1-based: BILL-0001, BILL-0002, ...)
+    const seriesNumber = formatSeriesBillNumber(index + 1, prefix);
+    map.set(p.id, seriesNumber);
+  });
+
+  return map;
 }
 
 /**
  * Generates a formal Receipt Number for a payment entry
  */
-export function generateReceiptNumber(purchaseId?: string): string {
+export function generateReceiptNumber(purchaseId?: string, paymentSeq?: number): string {
   const now = new Date();
   const year = now.getFullYear().toString().slice(2);
   const month = String(now.getMonth() + 1).padStart(2, '0');
-  const idPart = purchaseId ? purchaseId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() : Math.random().toString(36).slice(2, 6).toUpperCase();
-  const seq = Math.floor(100 + Math.random() * 900);
-  return `RCP-${year}${month}-${idPart}-${seq}`;
+  const idPart = purchaseId ? purchaseId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() : 'PAY';
+  const seqPadded = paymentSeq ? String(paymentSeq).padStart(3, '0') : String(Math.floor(100 + Math.random() * 900));
+  return `RCP-${year}${month}-${idPart}-${seqPadded}`;
 }
 
 /**
@@ -34,7 +166,8 @@ export function getOrGenerateBillNumber(
     purchase_date?: string;
     created_at?: string;
   },
-  auditLogs?: AuditLog[]
+  auditLogs?: Array<{ id?: string; purchase_id?: string; new_status?: string | null; notes?: string | null }> | AuditLog[],
+  fallbackIndex?: number
 ): string {
   if (purchase.bill_number && purchase.bill_number.trim()) {
     return purchase.bill_number.trim();
@@ -62,12 +195,14 @@ export function getOrGenerateBillNumber(
     }
   }
 
-  // Deterministic fallback based on purchase date and ID
-  const d = purchase.purchase_date || purchase.created_at || new Date().toISOString();
-  const year = d.slice(2, 4);
-  const month = d.slice(5, 7);
+  // If fallback chronological index is provided, use continuous series format (BILL-0001, BILL-0048)
+  if (fallbackIndex !== undefined && fallbackIndex > 0) {
+    return formatSeriesBillNumber(fallbackIndex);
+  }
+
+  // Fallback using first 4 hex characters
   const cleanId = (purchase.id || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || '0001';
-  return `BILL-${year}${month}-${cleanId}`;
+  return `BILL-${cleanId}`;
 }
 
 /**
@@ -220,11 +355,18 @@ export function computePurchasePaymentDetails(
  */
 export function enrichPurchaseWithPayments(
   purchase: Purchase & { audit_logs?: AuditLog[] },
-  auditLogs?: AuditLog[]
+  auditLogs?: AuditLog[],
+  fallbackIndexOrBillNumber?: number | string
 ): Purchase {
   const logs = auditLogs || purchase.audit_logs || [];
   const details = computePurchasePaymentDetails(purchase, logs);
-  const resolvedBillNumber = getOrGenerateBillNumber(purchase, logs);
+  const resolvedBillNumber = typeof fallbackIndexOrBillNumber === 'string' && fallbackIndexOrBillNumber
+    ? fallbackIndexOrBillNumber
+    : getOrGenerateBillNumber(
+        purchase,
+        logs,
+        typeof fallbackIndexOrBillNumber === 'number' ? fallbackIndexOrBillNumber : undefined
+      );
 
   return {
     ...purchase,

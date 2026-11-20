@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { enrichPurchaseWithPayments } from '@/lib/payment-helpers';
+import { enrichPurchaseWithPayments, buildChronologicalBillNumberMap } from '@/lib/payment-helpers';
 import { roundToTwoDecimals } from '@/lib/calculations';
 import { getPendingDaysCount } from '@/lib/utils';
 import {
@@ -45,10 +45,19 @@ export async function GET(request: NextRequest) {
       .select('*')
       .order('name', { ascending: true });
 
-    // 3. Enrich all purchases with partial payments and bill numbers
-    const allEnrichedPurchases = (rawPurchases || []).map((p) =>
-      enrichPurchaseWithPayments(p as any, p.audit_logs || [])
-    );
+    // 3. Build chronological bill map for continuous ascending series (BILL-0001, BILL-0002)
+    const { data: allBillLogs } = await supabase
+      .from('audit_logs')
+      .select('id, purchase_id, new_status, notes')
+      .eq('new_status', 'BILL_NUMBER');
+
+    const billMap = buildChronologicalBillNumberMap(rawPurchases || [], allBillLogs || []);
+
+    // 4. Enrich all purchases with partial payments and continuous series bill numbers
+    const allEnrichedPurchases = (rawPurchases || []).map((p) => {
+      const assignedBillNo = billMap.get(p.id);
+      return enrichPurchaseWithPayments(p as any, p.audit_logs || [], assignedBillNo);
+    });
 
     // Filter by date range if provided
     let filteredPurchases = allEnrichedPurchases;
