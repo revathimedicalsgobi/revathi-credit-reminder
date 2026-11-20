@@ -14,12 +14,14 @@ import {
   RotateCcw,
   MessageSquare,
   VolumeX,
+  Radio,
 } from 'lucide-react';
 import {
   VoiceBillingField,
   parseSingleFieldVoiceInput,
   parseAllInOneVoiceSentence,
   cleanVoiceMedicineName,
+  cleanVoiceCustomerName,
   isCompleteCommand,
   isProcessYes,
   isProcessNo,
@@ -52,6 +54,8 @@ export type VoiceStage =
   | 'ASK_MRP'
   | 'ASK_DISCOUNT'
   | 'ASK_CONFIRM_PROCESS';
+
+export type TurnState = 'IDLE' | 'AI_SPEAKING' | 'LISTENING_FOR_USER' | 'PROCESSING';
 
 interface VoiceBillingBarProps {
   items: ItemRow[];
@@ -88,8 +92,8 @@ export function VoiceBillingBar({
   totalAmountPayable = 0,
   onConfirmProcess,
 }: VoiceBillingBarProps) {
-  const [isListening, setIsListening] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isActiveSession, setIsActiveSession] = useState(false);
+  const [turn, setTurn] = useState<TurnState>('IDLE');
   const [voiceLang, setVoiceLang] = useState<'ta-IN' | 'en-IN'>('en-IN');
   const [voiceStage, setVoiceStage] = useState<VoiceStage>('IDLE');
   const [currentPrompt, setCurrentPrompt] = useState<string>('');
@@ -98,13 +102,13 @@ export function VoiceBillingBar({
   const [isSupported, setIsSupported] = useState(true);
   const [showTips, setShowTips] = useState(false);
 
-  // References to keep event handlers current without re-attaching
+  // Mutable refs to prevent stale closures and infinite render loops
   const recognitionRef = useRef<any>(null);
-  const isListeningRef = useRef(isListening);
-  isListeningRef.current = isListening;
+  const isActiveSessionRef = useRef(isActiveSession);
+  isActiveSessionRef.current = isActiveSession;
 
-  const isSpeakingRef = useRef(isSpeaking);
-  isSpeakingRef.current = isSpeaking;
+  const turnRef = useRef(turn);
+  turnRef.current = turn;
 
   const voiceStageRef = useRef(voiceStage);
   voiceStageRef.current = voiceStage;
@@ -127,6 +131,8 @@ export function VoiceBillingBar({
   const totalAmountPayableRef = useRef(totalAmountPayable);
   totalAmountPayableRef.current = totalAmountPayable;
 
+  const echoTimeoutRef = useRef<any>(null);
+
   // Check browser support
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -141,10 +147,12 @@ export function VoiceBillingBar({
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      if (echoTimeoutRef.current) clearTimeout(echoTimeoutRef.current);
       if (recognitionRef.current) {
         try {
           recognitionRef.current.abort();
         } catch {}
+        recognitionRef.current = null;
       }
       if (typeof window !== 'undefined' && window.speechSynthesis) {
         window.speechSynthesis.cancel();
@@ -152,7 +160,7 @@ export function VoiceBillingBar({
     };
   }, []);
 
-  // Beep sound confirmation
+  // Crisp audio chime sound when mic starts listening for user
   const playPing = useCallback(() => {
     if (typeof window === 'undefined') return;
     try {
@@ -172,28 +180,131 @@ export function VoiceBillingBar({
     } catch {}
   }, []);
 
+  // Hard stop & destroy microphone
+  const killRecognition = useCallback(() => {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.abort();
+      } catch {}
+      recognitionRef.current = null;
+    }
+    setInterimTranscript('');
+  }, []);
+
+  // Forward declarations
+  const handleFinalSpeechRef = useRef<(text: string) => Promise<void>>();
+
+  // Start listening only when AI has finished speaking
+  const startUserMic = useCallback(() => {
+    if (!isActiveSessionRef.current) return;
+    if (turnRef.current === 'AI_SPEAKING') return;
+
+    if (typeof window === 'undefined') return;
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+
+    killRecognition();
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false; // Single utterance per conversational turn prevents runaway loops
+      recognition.interimResults = true;
+      recognition.lang = voiceLang;
+
+      recognition.onstart = () => {
+        setTurn('LISTENING_FOR_USER');
+        turnRef.current = 'LISTENING_FOR_USER';
+        setInterimTranscript('');
+        playPing();
+      };
+
+      recognition.onresult = (event: any) => {
+        if (turnRef.current !== 'LISTENING_FOR_USER') return;
+
+        let interim = '';
+        let final = '';
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const item = event.results[i];
+          const text = item[0]?.transcript || '';
+          if (item.isFinal) {
+            final += text;
+          } else {
+            interim += text;
+          }
+        }
+
+        if (interim) {
+          setInterimTranscript(interim);
+        }
+
+        if (final && final.trim()) {
+          // USER FINISHED SPEAKING: Immediately cut off mic to prevent any background noise
+          killRecognition();
+          setTurn('PROCESSING');
+          turnRef.current = 'PROCESSING';
+          setInterimTranscript('');
+
+          if (handleFinalSpeechRef.current) {
+            handleFinalSpeechRef.current(final.trim());
+          }
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        if (event.error === 'no-speech' || event.error === 'audio-capture') {
+          // Quiet or timeout, can restart if still user's turn
+          if (isActiveSessionRef.current && turnRef.current === 'LISTENING_FOR_USER') {
+            try {
+              recognition.start();
+            } catch {}
+          }
+        } else {
+          console.warn('Voice billing speech error:', event.error);
+        }
+      };
+
+      recognition.onend = () => {
+        // If it ended on silence while it was still user's turn, smoothly restart
+        if (isActiveSessionRef.current && turnRef.current === 'LISTENING_FOR_USER') {
+          try {
+            recognition.start();
+          } catch {}
+        }
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (err) {
+      console.error('Failed to start speech recognition:', err);
+    }
+  }, [killRecognition, playPing, voiceLang]);
+
   // Text-to-Speech speaking function
-  // CRITICAL: Mutes / pauses speech recognition during speaking to avoid hearing its own echo!
+  // CRITICAL: MIC IS COMPLETELY DEAD / DESTROYED DURING AI SPEECH!
   const speakAssistant = useCallback(
     (text: string, onDone?: () => void) => {
       setCurrentPrompt(text);
+
+      // 1. Immediately kill microphone so computer voice CANNOT enter mic
+      killRecognition();
+      setTurn('AI_SPEAKING');
+      turnRef.current = 'AI_SPEAKING';
+
+      if (echoTimeoutRef.current) clearTimeout(echoTimeoutRef.current);
+
       if (typeof window === 'undefined' || !window.speechSynthesis) {
-        if (onDone) setTimeout(onDone, 300);
+        // Fallback if browser lacks speechSynthesis
+        setTurn('LISTENING_FOR_USER');
+        turnRef.current = 'LISTENING_FOR_USER';
+        startUserMic();
+        if (onDone) onDone();
         return;
       }
 
-      // Cancel any prior speech
+      // Cancel any ongoing audio
       window.speechSynthesis.cancel();
-
-      // Pause recognition so assistant voice doesn't get picked up
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch {}
-      }
-
-      setIsSpeaking(true);
-      isSpeakingRef.current = true;
 
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = voiceLang;
@@ -216,50 +327,52 @@ export function VoiceBillingBar({
         }
       }
 
+      // When AI finishes speaking:
       utterance.onend = () => {
-        setIsSpeaking(false);
-        isSpeakingRef.current = false;
-        // Resume listening if user still wants voice active
-        if (isListeningRef.current && recognitionRef.current) {
-          try {
-            recognitionRef.current.start();
-          } catch {}
-        }
-        if (onDone) onDone();
+        if (!isActiveSessionRef.current) return;
+
+        // 2. WAIT 400ms echo clearance buffer before enabling mic
+        echoTimeoutRef.current = setTimeout(() => {
+          if (!isActiveSessionRef.current) return;
+          if (onDone) {
+            onDone();
+          } else {
+            startUserMic();
+          }
+        }, 400);
       };
 
       utterance.onerror = () => {
-        setIsSpeaking(false);
-        isSpeakingRef.current = false;
-        if (isListeningRef.current && recognitionRef.current) {
-          try {
-            recognitionRef.current.start();
-          } catch {}
-        }
-        if (onDone) onDone();
+        if (!isActiveSessionRef.current) return;
+        echoTimeoutRef.current = setTimeout(() => {
+          if (!isActiveSessionRef.current) return;
+          if (onDone) {
+            onDone();
+          } else {
+            startUserMic();
+          }
+        }, 300);
       };
 
       window.speechSynthesis.speak(utterance);
     },
-    [voiceLang]
+    [killRecognition, startUserMic, voiceLang]
   );
 
-  // Stop active listening and speaking
-  const stopListening = useCallback(() => {
-    setIsListening(false);
-    isListeningRef.current = false;
+  // Stop everything
+  const stopVoiceSession = useCallback(() => {
+    setIsActiveSession(false);
+    isActiveSessionRef.current = false;
+    setTurn('IDLE');
+    turnRef.current = 'IDLE';
+
+    if (echoTimeoutRef.current) clearTimeout(echoTimeoutRef.current);
     if (typeof window !== 'undefined' && window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
-    setIsSpeaking(false);
-    isSpeakingRef.current = false;
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch {}
-    }
+    killRecognition();
     setInterimTranscript('');
-  }, []);
+  }, [killRecognition]);
 
   // Handle conversational speech input across states
   const handleFinalSpeech = useCallback(
@@ -274,17 +387,19 @@ export function VoiceBillingBar({
       // STAGE 1: ASK_CUSTOMER_NAME
       // ==========================================
       if (stage === 'ASK_CUSTOMER_NAME') {
-        const spoken = cleanVoiceMedicineName(clean) || clean;
-        const matched = findMatchingCustomer(spoken, savedCustomersRef.current);
+        // Use intelligent phonetic customer name cleaner ("money building" -> "Mani Building")
+        const customerNameSpoken = cleanVoiceCustomerName(clean) || clean;
+        const matched = findMatchingCustomer(clean, savedCustomersRef.current) ||
+                        findMatchingCustomer(customerNameSpoken, savedCustomersRef.current);
 
         if (matched) {
-          // Existing customer found
-          playPing();
+          // Existing customer found in master list
           if (onSelectCustomer) {
             onSelectCustomer(matched);
           }
-          setLastFeedback(`✓ Selected Customer: ${matched.name}`);
+          setLastFeedback(`✓ Found Customer: ${matched.name}`);
           setVoiceStage('ASK_ITEM_NAME');
+          voiceStageRef.current = 'ASK_ITEM_NAME';
 
           const prompt =
             voiceLang === 'ta-IN'
@@ -294,17 +409,17 @@ export function VoiceBillingBar({
           return;
         } else {
           // New customer detected
-          playPing();
           if (onSetCustomerName) {
-            onSetCustomerName(spoken);
+            onSetCustomerName(customerNameSpoken);
           }
-          setLastFeedback(`✓ New Customer: ${spoken}`);
+          setLastFeedback(`✓ New Customer: ${customerNameSpoken}`);
           setVoiceStage('ASK_CUSTOMER_PHONE');
+          voiceStageRef.current = 'ASK_CUSTOMER_PHONE';
 
           const prompt =
             voiceLang === 'ta-IN'
-              ? `புதிய வாடிக்கையாளர் ${spoken}. வாட்ஸ்அப் மொபைல் எண் சொல்லுங்கள்.`
-              : `New customer ${spoken}. Please say their 10-digit mobile number.`;
+              ? `புதிய வாடிக்கையாளர் ${customerNameSpoken}. வாட்ஸ்அப் மொபைல் எண் சொல்லுங்கள்.`
+              : `New customer ${customerNameSpoken}. Please say their 10-digit mobile number.`;
           speakAssistant(prompt);
           return;
         }
@@ -316,7 +431,6 @@ export function VoiceBillingBar({
       if (stage === 'ASK_CUSTOMER_PHONE') {
         const phone = extract10DigitPhoneNumber(clean);
         if (phone) {
-          playPing();
           if (onSetWhatsappNumber) {
             onSetWhatsappNumber(phone);
           }
@@ -324,8 +438,9 @@ export function VoiceBillingBar({
           if (onSaveNewCustomer && customerNameRef.current) {
             await onSaveNewCustomer(customerNameRef.current, phone);
           }
-          setLastFeedback(`✓ Phone: ${phone} | Customer Saved!`);
+          setLastFeedback(`✓ Mobile: ${phone} | Customer Saved!`);
           setVoiceStage('ASK_ITEM_NAME');
+          voiceStageRef.current = 'ASK_ITEM_NAME';
 
           const prompt =
             voiceLang === 'ta-IN'
@@ -350,19 +465,18 @@ export function VoiceBillingBar({
       if (stage === 'ASK_ITEM_NAME') {
         // A. Check if user said "Complete" / "Done" / "முடிந்தது"
         if (isCompleteCommand(clean)) {
-          // Check if there are any valid items
           const validItems = itemsRef.current.filter((it) => it.itemName.trim() && Number(it.mrp) > 0);
           if (validItems.length === 0) {
             const prompt =
               voiceLang === 'ta-IN'
-                ? `பில்லில் மருந்துகள் எதுவும் சேர்க்கப்படவில்லை. மருந்து பெயர் சொல்லுங்கள்.`
+                ? `பில்லில் மருந்துகள் சேர்க்கப்படவில்லை. மருந்து பெயர் சொல்லுங்கள்.`
                 : `No medicines added yet. Please say a medicine name.`;
             speakAssistant(prompt);
             return;
           }
 
-          playPing();
           setVoiceStage('ASK_CONFIRM_PROCESS');
+          voiceStageRef.current = 'ASK_CONFIRM_PROCESS';
           const totalFormatted = formatINR(totalAmountPayableRef.current);
           const prompt =
             voiceLang === 'ta-IN'
@@ -372,11 +486,9 @@ export function VoiceBillingBar({
           return;
         }
 
-        // B. Check if user spoke an ALL-IN-ONE sentence
-        // e.g. "Dolo 650 1 strip mrp 33 point 50 discount 15%"
+        // B. Check if user spoke an ALL-IN-ONE sentence (e.g. "Dolo 650 1 strip mrp 33.50 discount 15%")
         const fullSentence = parseAllInOneVoiceSentence(clean);
         if (fullSentence && currentRow) {
-          playPing();
           onUpdateField(currentRow.id, 'itemName', fullSentence.itemName);
           onUpdateField(currentRow.id, 'quantity', fullSentence.quantity);
           onUpdateField(currentRow.id, 'mrp', fullSentence.mrp);
@@ -384,11 +496,12 @@ export function VoiceBillingBar({
 
           setLastFeedback(`✓ Added ${fullSentence.itemName} | Qty: ${fullSentence.quantity} | MRP: ₹${fullSentence.mrp}`);
 
-          // Create next row for following item
+          // Create next row
           onAddRow();
           const nextIdx = itemsRef.current.length;
           setActiveRowIndex(nextIdx);
           setVoiceStage('ASK_ITEM_NAME');
+          voiceStageRef.current = 'ASK_ITEM_NAME';
 
           const prompt =
             voiceLang === 'ta-IN'
@@ -401,10 +514,10 @@ export function VoiceBillingBar({
         // C. Standard single medicine name
         const medName = cleanVoiceMedicineName(clean);
         if (medName.length >= 2 && currentRow) {
-          playPing();
           onUpdateField(currentRow.id, 'itemName', medName);
           setLastFeedback(`✓ Product: ${medName}`);
           setVoiceStage('ASK_QUANTITY');
+          voiceStageRef.current = 'ASK_QUANTITY';
 
           const prompt =
             voiceLang === 'ta-IN' ? `அளவு எத்தனை?` : `Quantity?`;
@@ -419,10 +532,10 @@ export function VoiceBillingBar({
       if (stage === 'ASK_QUANTITY') {
         const qtyRes = parseSingleFieldVoiceInput(clean, 'quantity');
         if (qtyRes && currentRow) {
-          playPing();
           onUpdateField(currentRow.id, 'quantity', qtyRes.value);
           setLastFeedback(`✓ Qty: ${qtyRes.value}`);
           setVoiceStage('ASK_MRP');
+          voiceStageRef.current = 'ASK_MRP';
 
           const prompt =
             voiceLang === 'ta-IN' ? `எம்.ஆர்.பி விலை சொல்லுங்கள்` : `MRP price?`;
@@ -444,10 +557,10 @@ export function VoiceBillingBar({
       if (stage === 'ASK_MRP') {
         const mrpRes = parseSingleFieldVoiceInput(clean, 'mrp');
         if (mrpRes && currentRow) {
-          playPing();
           onUpdateField(currentRow.id, 'mrp', mrpRes.value);
           setLastFeedback(`✓ MRP: ₹${mrpRes.value}`);
           setVoiceStage('ASK_DISCOUNT');
+          voiceStageRef.current = 'ASK_DISCOUNT';
 
           const prompt =
             voiceLang === 'ta-IN'
@@ -471,15 +584,15 @@ export function VoiceBillingBar({
       if (stage === 'ASK_DISCOUNT') {
         const discRes = parseSingleFieldVoiceInput(clean, 'discount');
         if (discRes && currentRow) {
-          playPing();
           onUpdateField(currentRow.id, 'discount', discRes.value);
-          setLastFeedback(`✓ Disc: ${discRes.value}% | Item Complete!`);
+          setLastFeedback(`✓ Disc: ${discRes.value}% | Item Added!`);
 
           // Create next item row and advance
           onAddRow();
           const nextIdx = itemsRef.current.length;
           setActiveRowIndex(nextIdx);
           setVoiceStage('ASK_ITEM_NAME');
+          voiceStageRef.current = 'ASK_ITEM_NAME';
 
           const prompt =
             voiceLang === 'ta-IN'
@@ -503,9 +616,8 @@ export function VoiceBillingBar({
       if (stage === 'ASK_CONFIRM_PROCESS') {
         if (isProcessYes(clean)) {
           // User said "Yes" / "Process" / "ஆம்"
-          playPing();
           setLastFeedback(`✓ Processing Bill...`);
-          stopListening();
+          stopVoiceSession();
 
           const prompt =
             voiceLang === 'ta-IN'
@@ -521,9 +633,8 @@ export function VoiceBillingBar({
 
         if (isProcessNo(clean)) {
           // User said "No" / "Wait" / "இல்லை"
-          playPing();
           setLastFeedback(`✓ Waiting for manual review`);
-          stopListening();
+          stopVoiceSession();
 
           const prompt =
             voiceLang === 'ta-IN'
@@ -549,106 +660,30 @@ export function VoiceBillingBar({
       onSetWhatsappNumber,
       onSaveNewCustomer,
       onUpdateField,
-      playPing,
       setActiveRowIndex,
       speakAssistant,
-      stopListening,
+      stopVoiceSession,
       voiceLang,
     ]
   );
 
-  // Initialize SpeechRecognition
-  const startListening = useCallback(() => {
-    if (typeof window === 'undefined') return;
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      alert('Speech Recognition is not supported on this browser. Please use Google Chrome or Microsoft Edge.');
-      return;
-    }
-
-    try {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.abort();
-        } catch {}
-      }
-
-      const recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = voiceLang;
-
-      recognition.onstart = () => {
-        setIsListening(true);
-        setInterimTranscript('');
-      };
-
-      recognition.onresult = (event: any) => {
-        // If the computer itself is speaking aloud, ignore incoming audio to prevent self-loop
-        if (isSpeakingRef.current) return;
-
-        let interim = '';
-        let final = '';
-
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const item = event.results[i];
-          const text = item[0]?.transcript || '';
-          if (item.isFinal) {
-            final += text;
-          } else {
-            interim += text;
-          }
-        }
-
-        if (interim) {
-          setInterimTranscript(interim);
-        }
-
-        if (final) {
-          setInterimTranscript('');
-          handleFinalSpeech(final);
-        }
-      };
-
-      recognition.onerror = (event: any) => {
-        if (event.error !== 'no-speech') {
-          console.warn('Voice billing speech error:', event.error);
-        }
-      };
-
-      recognition.onend = () => {
-        // Auto-restart if user still wants listening active AND assistant is not currently speaking
-        if (isListeningRef.current && !isSpeakingRef.current) {
-          try {
-            recognition.start();
-          } catch {}
-        } else if (!isListeningRef.current) {
-          setIsListening(false);
-          setInterimTranscript('');
-        }
-      };
-
-      recognitionRef.current = recognition;
-      recognition.start();
-    } catch (err) {
-      console.error('Failed to start speech recognition:', err);
-      setIsListening(false);
-    }
-  }, [handleFinalSpeech, voiceLang]);
+  handleFinalSpeechRef.current = handleFinalSpeech;
 
   // Main Action: Trigger Conversational Voice Assistant
+  // NEVER starts mic immediately — AI speaks first with mic OFF!
   const toggleListening = () => {
-    if (isListening) {
-      stopListening();
+    if (isActiveSession) {
+      stopVoiceSession();
       setVoiceStage('IDLE');
+      voiceStageRef.current = 'IDLE';
     } else {
-      startListening();
+      setIsActiveSession(true);
+      isActiveSessionRef.current = true;
 
       // Initiate conversation based on current form state
       if (!customerNameRef.current.trim()) {
         setVoiceStage('ASK_CUSTOMER_NAME');
+        voiceStageRef.current = 'ASK_CUSTOMER_NAME';
         const initialPrompt =
           voiceLang === 'ta-IN'
             ? `வாடிக்கையாளர் பெயர் சொல்லுங்கள்`
@@ -656,6 +691,7 @@ export function VoiceBillingBar({
         speakAssistant(initialPrompt);
       } else {
         setVoiceStage('ASK_ITEM_NAME');
+        voiceStageRef.current = 'ASK_ITEM_NAME';
         const initialPrompt =
           voiceLang === 'ta-IN'
             ? `வாடிக்கையாளர் ${customerNameRef.current}. முதல் மருந்து பெயர் சொல்லுங்கள்.`
@@ -700,12 +736,20 @@ export function VoiceBillingBar({
         <div className="flex items-center gap-2.5">
           <div
             className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${
-              isListening
-                ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/50 animate-pulse'
+              isActiveSession
+                ? turn === 'LISTENING_FOR_USER'
+                  ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/50 animate-pulse'
+                  : 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/50'
                 : 'bg-white/10 text-emerald-400'
             }`}
           >
-            <Mic className="w-5 h-5" />
+            {isActiveSession && turn === 'AI_SPEAKING' ? (
+              <Volume2 className="w-5 h-5 animate-bounce" />
+            ) : isActiveSession && turn === 'LISTENING_FOR_USER' ? (
+              <Mic className="w-5 h-5 animate-pulse" />
+            ) : (
+              <Mic className="w-5 h-5" />
+            )}
           </div>
           <div>
             <div className="flex items-center gap-2">
@@ -719,7 +763,7 @@ export function VoiceBillingBar({
               </span>
             </div>
             <p className="text-xs text-emerald-200/80 mt-0.5">
-              Conversational billing: Asks customer name, medicine details, and confirms bill processing!
+              Turn-based voice assistant: Mic automatically shuts off while AI speaks!
             </p>
           </div>
         </div>
@@ -732,9 +776,8 @@ export function VoiceBillingBar({
             onChange={(e) => {
               const newLang = e.target.value as 'ta-IN' | 'en-IN';
               setVoiceLang(newLang);
-              if (isListening) {
-                stopListening();
-                setTimeout(() => startListening(), 200);
+              if (isActiveSession) {
+                stopVoiceSession();
               }
             }}
             className="bg-black/30 text-emerald-200 border border-emerald-500/40 text-xs font-bold rounded-xl px-2.5 py-2 focus:outline-none cursor-pointer hover:bg-black/40"
@@ -758,12 +801,12 @@ export function VoiceBillingBar({
             type="button"
             onClick={toggleListening}
             className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-extrabold shadow-md transition-all transform active:scale-95 ${
-              isListening
+              isActiveSession
                 ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-rose-600/40 ring-4 ring-rose-500/30'
                 : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black shadow-emerald-500/30'
             }`}
           >
-            {isListening ? (
+            {isActiveSession ? (
               <>
                 <MicOff className="w-4 h-4 animate-spin" />
                 <span>Stop Voice ⏹️</span>
@@ -778,30 +821,37 @@ export function VoiceBillingBar({
         </div>
       </div>
 
-      {/* Guided Conversational Question & Status Box */}
-      <div className="bg-black/40 border border-emerald-500/30 rounded-xl p-3.5 space-y-2">
+      {/* Guided Turn Status & Question Box */}
+      <div className="bg-black/40 border border-emerald-500/30 rounded-xl p-3.5 space-y-2.5">
         <div className="flex items-center justify-between gap-2">
+          {/* Active Turn Indicator */}
           <div className="flex items-center gap-2 min-w-0">
-            {isSpeaking ? (
-              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-400/30 text-[11px] font-bold animate-pulse">
-                <Volume2 className="w-3.5 h-3.5 animate-bounce" />
-                <span>Assistant Speaking...</span>
+            {turn === 'AI_SPEAKING' ? (
+              <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-amber-500/25 text-amber-200 border border-amber-400/40 text-xs font-black animate-pulse">
+                <Volume2 className="w-4 h-4 text-amber-300 animate-bounce" />
+                <span>AI Speaking Question... (Mic Paused 🔇)</span>
               </div>
-            ) : isListening ? (
-              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-[11px] font-bold">
-                <span className="w-2 h-2 bg-emerald-400 rounded-full animate-ping" />
-                <span>Listening for your answer...</span>
+            ) : turn === 'LISTENING_FOR_USER' ? (
+              <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-emerald-500/25 text-emerald-200 border border-emerald-400/40 text-xs font-black">
+                <span className="w-2.5 h-2.5 bg-emerald-400 rounded-full animate-ping" />
+                <Mic className="w-4 h-4 text-emerald-300" />
+                <span>Mic Active — Speak Now 🎙️</span>
+              </div>
+            ) : turn === 'PROCESSING' ? (
+              <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-sky-500/25 text-sky-200 border border-sky-400/40 text-xs font-bold">
+                <span className="w-2 h-2 bg-sky-400 rounded-full animate-spin" />
+                <span>Processing your answer...</span>
               </div>
             ) : (
-              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-white/10 text-slate-300 text-[11px] font-medium">
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/10 text-slate-300 text-xs font-medium">
                 <MessageSquare className="w-3.5 h-3.5 text-slate-400" />
-                <span>Ready to start</span>
+                <span>Ready to start voice billing</span>
               </div>
             )}
           </div>
 
           {/* Repeat Question Button */}
-          {currentPrompt && isListening && (
+          {currentPrompt && isActiveSession && (
             <button
               type="button"
               onClick={() => speakAssistant(currentPrompt)}
@@ -816,19 +866,23 @@ export function VoiceBillingBar({
 
         {/* Current Active Question Spoken Aloud */}
         {currentPrompt && (
-          <div className="p-2.5 bg-emerald-950/60 rounded-lg border border-emerald-500/20 flex items-start gap-2">
+          <div className="p-3 bg-emerald-950/70 rounded-xl border border-emerald-500/30 flex items-start gap-2.5">
             <Volume2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-            <p className="text-xs font-bold text-emerald-100 leading-snug">
+            <div className="text-xs font-bold text-emerald-100 leading-snug">
+              <span className="text-emerald-400 uppercase text-[10px] tracking-wider block font-black mb-0.5">
+                AI Question:
+              </span>
               &ldquo;{currentPrompt}&rdquo;
-            </p>
+            </div>
           </div>
         )}
 
         {/* Live Audio Transcript / Feedback */}
         <div className="min-w-0">
           {interimTranscript ? (
-            <p className="text-xs font-bold text-amber-300 italic truncate">
-              🗣️ Heard: &ldquo;{interimTranscript}...&rdquo;
+            <p className="text-xs font-bold text-amber-300 italic truncate flex items-center gap-1.5">
+              <Radio className="w-3.5 h-3.5 text-amber-400 animate-pulse flex-shrink-0" />
+              <span>Hearing: &ldquo;{interimTranscript}...&rdquo;</span>
             </p>
           ) : lastFeedback ? (
             <p className="text-xs font-bold text-emerald-300 flex items-center gap-1 truncate">
@@ -837,8 +891,10 @@ export function VoiceBillingBar({
             </p>
           ) : (
             <p className="text-xs text-emerald-200/70 truncate">
-              {isListening
-                ? 'Speak clearly into your microphone...'
+              {isActiveSession
+                ? turn === 'AI_SPEAKING'
+                  ? 'Please listen to the question. The mic will turn on as soon as the assistant finishes.'
+                  : 'Speak clearly into your microphone...'
                 : 'Click "Start Voice Billing 🎙️" to begin interactive billing conversation'}
             </p>
           )}
@@ -855,6 +911,7 @@ export function VoiceBillingBar({
           type="button"
           onClick={() => {
             setVoiceStage('ASK_CUSTOMER_NAME');
+            voiceStageRef.current = 'ASK_CUSTOMER_NAME';
             speakAssistant(voiceLang === 'ta-IN' ? 'வாடிக்கையாளர் பெயர் சொல்லுங்கள்' : 'Please say the customer name');
           }}
           className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold transition-all text-xs ${
@@ -872,6 +929,7 @@ export function VoiceBillingBar({
           type="button"
           onClick={() => {
             setVoiceStage('ASK_ITEM_NAME');
+            voiceStageRef.current = 'ASK_ITEM_NAME';
             speakAssistant(voiceLang === 'ta-IN' ? 'மருந்து பெயர் சொல்லுங்கள்' : 'Please say the medicine name');
           }}
           className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold transition-all text-xs ${
@@ -889,6 +947,7 @@ export function VoiceBillingBar({
           type="button"
           onClick={() => {
             setVoiceStage('ASK_QUANTITY');
+            voiceStageRef.current = 'ASK_QUANTITY';
             speakAssistant(voiceLang === 'ta-IN' ? 'அளவு எத்தனை?' : 'Quantity?');
           }}
           className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold transition-all text-xs ${
@@ -906,6 +965,7 @@ export function VoiceBillingBar({
           type="button"
           onClick={() => {
             setVoiceStage('ASK_MRP');
+            voiceStageRef.current = 'ASK_MRP';
             speakAssistant(voiceLang === 'ta-IN' ? 'எம்.ஆர்.பி விலை சொல்லுங்கள்' : 'MRP price?');
           }}
           className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold transition-all text-xs ${
@@ -923,6 +983,7 @@ export function VoiceBillingBar({
           type="button"
           onClick={() => {
             setVoiceStage('ASK_DISCOUNT');
+            voiceStageRef.current = 'ASK_DISCOUNT';
             speakAssistant(voiceLang === 'ta-IN' ? 'தள்ளுபடி சதவீதம் எவ்வளவு?' : 'Discount percentage?');
           }}
           className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold transition-all text-xs ${
@@ -938,6 +999,7 @@ export function VoiceBillingBar({
           type="button"
           onClick={() => {
             setVoiceStage('ASK_CONFIRM_PROCESS');
+            voiceStageRef.current = 'ASK_CONFIRM_PROCESS';
             const totalFormatted = formatINR(totalAmountPayable);
             const prompt =
               voiceLang === 'ta-IN'
@@ -965,6 +1027,12 @@ export function VoiceBillingBar({
             <span>Interactive Voice Billing Guide:</span>
           </div>
           <ul className="space-y-1.5 text-[11px] list-disc list-inside text-emerald-200/90 leading-relaxed">
+            <li>
+              <strong>Echo-Free Conversational Turn:</strong> The mic automatically stays off while the AI speaks questions. Once AI finishes speaking, the mic turns ON with a chime!
+            </li>
+            <li>
+              <strong>Indian Names Support:</strong> Names like <em>&ldquo;Mani Building&rdquo;</em> (even if speech recognition transcribes as <em>&ldquo;money building&rdquo;</em>) are automatically mapped to <strong>Mani Building</strong>.
+            </li>
             <li>
               <strong>1. Customer:</strong> The assistant asks <em>&ldquo;Customer name?&rdquo;</em>. If existing, it auto-selects. If new, it asks for mobile number and adds directly to Dashboard!
             </li>

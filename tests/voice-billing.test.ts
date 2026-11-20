@@ -5,6 +5,8 @@ import {
   parseSingleFieldVoiceInput,
   parseAllInOneVoiceSentence,
   cleanVoiceMedicineName,
+  cleanVoiceCustomerName,
+  normalizeCustomerComparisonKey,
   isCompleteCommand,
   isProcessYes,
   isProcessNo,
@@ -148,5 +150,32 @@ describe('Voice Billing Parser Tests', () => {
     expect(findMatchingCustomer('Dr Boopathy', list)?.id).toBe('c2');
     expect(findMatchingCustomer('9988776655', list)?.id).toBe('c3');
     expect(findMatchingCustomer('Unknown Person', list)).toBeNull();
+  });
+
+  it('correctly cleans and phonetically maps customer names like "money building" -> "Mani Building"', () => {
+    // Exact user case: user says "mani building" but ASR transcribed "money building"
+    expect(cleanVoiceCustomerName('money building')).toBe('Mani Building');
+    expect(cleanVoiceCustomerName('mani building')).toBe('Mani Building');
+    expect(cleanVoiceCustomerName('customer name is money building')).toBe('Mani Building');
+    expect(cleanVoiceCustomerName('money')).toBe('Mani');
+    expect(cleanVoiceCustomerName('money kandan')).toBe('Manikandan');
+    expect(cleanVoiceCustomerName('customer Mani')).toBe('Mani');
+
+    // Phonetic matching against saved customers list
+    const customerList = [
+      { id: 'c10', name: 'Mani Building', whatsapp_number: '+919876543210' },
+      { id: 'c11', name: 'Dr. Boopathy', whatsapp_number: '+919443322110' },
+    ];
+
+    // Spoken query is "money building" (due to English ASR), but database has "Mani Building"
+    const match = findMatchingCustomer('money building', customerList);
+    expect(match).not.toBeNull();
+    expect(match?.name).toBe('Mani Building');
+    expect(match?.id).toBe('c10');
+
+    // Spoken query is "Mani Building"
+    const match2 = findMatchingCustomer('mani building', customerList);
+    expect(match2).not.toBeNull();
+    expect(match2?.name).toBe('Mani Building');
   });
 });

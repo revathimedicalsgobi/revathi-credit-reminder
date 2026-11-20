@@ -112,6 +112,77 @@ export function parseVoicePriceOrNumber(raw: string): string | null {
 }
 
 /**
+ * Common phonetic misrecognitions where English speech recognition transforms
+ * Indian / Tamil customer names into common English words.
+ */
+export const PHONETIC_NAME_MAPPINGS: Array<[RegExp, string]> = [
+  // "money building" -> "Mani Building"
+  [/\bmoney\s*building\b/gi, 'Mani Building'],
+  // "money kandan" -> "Manikandan"
+  [/\bmoney\s*kandan\b/gi, 'Manikandan'],
+  // "money maran" -> "Manimaran"
+  [/\bmoney\s*maran\b/gi, 'Manimaran'],
+  // "money vel" -> "Manivel"
+  [/\bmoney\s*vel(?:an)?\b/gi, 'Manivel'],
+  // "money" -> "Mani" (very common Tamil name மணி transcribed as "money" by English ASR)
+  [/\bmoney\b/gi, 'Mani'],
+  // "dollar" -> "Dolo" (sometimes spoken in context)
+  [/\bdollar\b/gi, 'Dolo'],
+  // "doctor" / "dr"
+  [/\b(?:doctor|dr)\.?\s+/gi, 'Dr. '],
+];
+
+/**
+ * Cleans a spoken customer name:
+ * - Strips voice filler prefixes like "customer name is", "name is", "customer", etc.
+ * - Replaces phonetic ASR confusions like "money" -> "Mani", "money building" -> "Mani Building"
+ * - Properly capitalizes and formats the name
+ */
+export function cleanVoiceCustomerName(raw: string): string {
+  if (!raw) return '';
+  let str = raw.trim();
+
+  // Strip common voice filler prefixes
+  str = str.replace(
+    /^(?:customer\s*name\s*is|customer\s*is|customer|client|வாடிக்கையாளர்\s*பெயர்|வாடிக்கையாளர்|பெயர்\s*என்னன்னா|பெயர்|பேர்)\s*[:=]?\s*/gi,
+    ''
+  );
+
+  // Apply phonetic mappings (e.g. "money building" -> "Mani Building", "money" -> "Mani")
+  for (const [pattern, replacement] of PHONETIC_NAME_MAPPINGS) {
+    str = str.replace(pattern, replacement);
+  }
+
+  // Clean unwanted special characters except hyphens and dots (e.g. Dr.)
+  str = str.replace(/[^\w\s\u0B80-\u0BFF.-]/gi, ' ').replace(/\s+/g, ' ').trim();
+
+  if (!str) return '';
+
+  // Capitalize each word nicely
+  return str
+    .split(' ')
+    .map((w) => {
+      if (w.toLowerCase() === 'dr.') return 'Dr.';
+      return w.charAt(0).toUpperCase() + w.slice(1);
+    })
+    .join(' ');
+}
+
+/**
+ * Normalizes a customer name for robust comparison:
+ * e.g. "money building" and "Mani Building" normalize to "manibuilding"
+ */
+export function normalizeCustomerComparisonKey(text: string): string {
+  if (!text) return '';
+  let key = text.toLowerCase().trim();
+  for (const [pattern, replacement] of PHONETIC_NAME_MAPPINGS) {
+    key = key.replace(pattern, replacement.toLowerCase());
+  }
+  // Remove non-alphanumeric
+  return key.replace(/[^a-z0-9\u0B80-\u0BFF]/g, '');
+}
+
+/**
  * Cleans a spoken medicine name by removing voice filler commands
  */
 export function cleanVoiceMedicineName(raw: string): string {
@@ -402,6 +473,7 @@ export interface VoiceCustomerMatch {
 
 /**
  * Finds a customer from the saved master list based on voice input name or phone
+ * Uses phonetic normalization (e.g. "money building" matches "Mani Building")
  */
 export function findMatchingCustomer<T extends { id: string; name: string; whatsapp_number: string }>(
   spokenQuery: string,
@@ -425,7 +497,22 @@ export function findMatchingCustomer<T extends { id: string; name: string; whats
   );
   if (exactMatch) return exactMatch;
 
-  // 3. Name contains query or query contains name
+  // 3. Phonetic key comparison (e.g. "money building" vs "Mani Building")
+  const queryKey = normalizeCustomerComparisonKey(spokenQuery);
+  if (queryKey) {
+    const phoneticExact = customers.find(
+      (c) => normalizeCustomerComparisonKey(c.name) === queryKey
+    );
+    if (phoneticExact) return phoneticExact;
+
+    const phoneticPartial = customers.find((c) => {
+      const cKey = normalizeCustomerComparisonKey(c.name);
+      return cKey && (cKey.includes(queryKey) || queryKey.includes(cKey));
+    });
+    if (phoneticPartial) return phoneticPartial;
+  }
+
+  // 4. Name contains query or query contains name
   const partialMatch = customers.find((c) => {
     const cName = c.name.toLowerCase().trim();
     return cName.includes(q) || q.includes(cName);
