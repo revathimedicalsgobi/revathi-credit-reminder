@@ -8,13 +8,15 @@ import {
   ChevronRight,
   Plus,
   Volume2,
+  VolumeX,
   CheckCircle2,
   AlertCircle,
   HelpCircle,
   RotateCcw,
   MessageSquare,
-  VolumeX,
   Radio,
+  Play,
+  FastForward,
 } from 'lucide-react';
 import {
   VoiceBillingField,
@@ -101,14 +103,18 @@ export function VoiceBillingBar({
   const [lastFeedback, setLastFeedback] = useState<string | null>(null);
   const [isSupported, setIsSupported] = useState(true);
   const [showTips, setShowTips] = useState(false);
+  const [isAudioMuted, setIsAudioMuted] = useState(false); // Toggle: Mute AI voice for ultra-fast visual-only mic flow
 
-  // Mutable refs to prevent stale closures and infinite render loops
+  // Mutable refs to prevent stale closures and infinite re-render loops
   const recognitionRef = useRef<any>(null);
   const isActiveSessionRef = useRef(isActiveSession);
   isActiveSessionRef.current = isActiveSession;
 
   const turnRef = useRef(turn);
   turnRef.current = turn;
+
+  const isAudioMutedRef = useRef(isAudioMuted);
+  isAudioMutedRef.current = isAudioMuted;
 
   const voiceStageRef = useRef(voiceStage);
   voiceStageRef.current = voiceStage;
@@ -132,6 +138,8 @@ export function VoiceBillingBar({
   totalAmountPayableRef.current = totalAmountPayable;
 
   const echoTimeoutRef = useRef<any>(null);
+  const speechFallbackTimerRef = useRef<any>(null);
+  const activeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
   // Check browser support
   useEffect(() => {
@@ -148,6 +156,7 @@ export function VoiceBillingBar({
   useEffect(() => {
     return () => {
       if (echoTimeoutRef.current) clearTimeout(echoTimeoutRef.current);
+      if (speechFallbackTimerRef.current) clearTimeout(speechFallbackTimerRef.current);
       if (recognitionRef.current) {
         try {
           recognitionRef.current.abort();
@@ -194,21 +203,26 @@ export function VoiceBillingBar({
   // Forward declarations
   const handleFinalSpeechRef = useRef<(text: string) => Promise<void>>();
 
-  // Start listening only when AI has finished speaking
+  // Start listening only when AI has finished speaking (or user clicks Speak Now)
   const startUserMic = useCallback(() => {
     if (!isActiveSessionRef.current) return;
-    if (turnRef.current === 'AI_SPEAKING') return;
 
     if (typeof window === 'undefined') return;
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) return;
 
+    // Destroy any existing recognition instance first
     killRecognition();
+
+    // Mark state as listening immediately so UI lights up green
+    setTurn('LISTENING_FOR_USER');
+    turnRef.current = 'LISTENING_FOR_USER';
+    setInterimTranscript('');
 
     try {
       const recognition = new SpeechRecognition();
-      recognition.continuous = false; // Single utterance per conversational turn prevents runaway loops
+      recognition.continuous = false; // Single utterance per turn prevents runaway echo
       recognition.interimResults = true;
       recognition.lang = voiceLang;
 
@@ -240,7 +254,7 @@ export function VoiceBillingBar({
         }
 
         if (final && final.trim()) {
-          // USER FINISHED SPEAKING: Immediately cut off mic to prevent any background noise
+          // USER FINISHED SPEAKING: Immediately cut off mic to prevent background noise
           killRecognition();
           setTurn('PROCESSING');
           turnRef.current = 'PROCESSING';
@@ -254,11 +268,15 @@ export function VoiceBillingBar({
 
       recognition.onerror = (event: any) => {
         if (event.error === 'no-speech' || event.error === 'audio-capture') {
-          // Quiet or timeout, can restart if still user's turn
+          // Restart if still user's turn
           if (isActiveSessionRef.current && turnRef.current === 'LISTENING_FOR_USER') {
-            try {
-              recognition.start();
-            } catch {}
+            setTimeout(() => {
+              if (isActiveSessionRef.current && turnRef.current === 'LISTENING_FOR_USER') {
+                try {
+                  recognition.start();
+                } catch {}
+              }
+            }, 300);
           }
         } else {
           console.warn('Voice billing speech error:', event.error);
@@ -266,11 +284,15 @@ export function VoiceBillingBar({
       };
 
       recognition.onend = () => {
-        // If it ended on silence while it was still user's turn, smoothly restart
+        // If it ended while it was still user's turn, smoothly restart
         if (isActiveSessionRef.current && turnRef.current === 'LISTENING_FOR_USER') {
-          try {
-            recognition.start();
-          } catch {}
+          setTimeout(() => {
+            if (isActiveSessionRef.current && turnRef.current === 'LISTENING_FOR_USER') {
+              try {
+                recognition.start();
+              } catch {}
+            }
+          }, 200);
         }
       };
 
@@ -281,80 +303,99 @@ export function VoiceBillingBar({
     }
   }, [killRecognition, playPing, voiceLang]);
 
-  // Text-to-Speech speaking function
-  // CRITICAL: MIC IS COMPLETELY DEAD / DESTROYED DURING AI SPEECH!
+  // Text-to-Speech speaking function with FAILSAFE AUTO-MIC TIMER
   const speakAssistant = useCallback(
     (text: string, onDone?: () => void) => {
       setCurrentPrompt(text);
 
       // 1. Immediately kill microphone so computer voice CANNOT enter mic
       killRecognition();
-      setTurn('AI_SPEAKING');
-      turnRef.current = 'AI_SPEAKING';
 
       if (echoTimeoutRef.current) clearTimeout(echoTimeoutRef.current);
+      if (speechFallbackTimerRef.current) clearTimeout(speechFallbackTimerRef.current);
 
-      if (typeof window === 'undefined' || !window.speechSynthesis) {
-        // Fallback if browser lacks speechSynthesis
+      const proceedToMic = () => {
+        if (speechFallbackTimerRef.current) clearTimeout(speechFallbackTimerRef.current);
+        if (activeUtteranceRef.current) activeUtteranceRef.current = null;
+        if (!isActiveSessionRef.current) return;
+        if (onDone) {
+          onDone();
+        } else {
+          startUserMic();
+        }
+      };
+
+      // If user muted audio, or browser lacks TTS: Activate mic immediately!
+      if (isAudioMutedRef.current || typeof window === 'undefined' || !window.speechSynthesis) {
         setTurn('LISTENING_FOR_USER');
         turnRef.current = 'LISTENING_FOR_USER';
-        startUserMic();
-        if (onDone) onDone();
+        proceedToMic();
         return;
       }
 
-      // Cancel any ongoing audio
-      window.speechSynthesis.cancel();
+      setTurn('AI_SPEAKING');
+      turnRef.current = 'AI_SPEAKING';
 
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = voiceLang;
-      utterance.rate = 1.0;
-      utterance.pitch = 1.0;
-
-      // Select voice matching language if available
-      const voices = window.speechSynthesis.getVoices();
-      if (voices && voices.length > 0) {
-        if (voiceLang === 'ta-IN') {
-          const tamilVoice = voices.find((v) => v.lang.toLowerCase().includes('ta'));
-          if (tamilVoice) utterance.voice = tamilVoice;
-        } else {
-          const indianVoice = voices.find(
-            (v) =>
-              v.lang.toLowerCase().includes('en-in') ||
-              v.name.toLowerCase().includes('india')
-          );
-          if (indianVoice) utterance.voice = indianVoice;
+      try {
+        window.speechSynthesis.cancel();
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
         }
+
+        const utterance = new SpeechSynthesisUtterance(text);
+        activeUtteranceRef.current = utterance; // Prevent garbage collection in Chrome
+        utterance.lang = voiceLang;
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+
+        // Select voice matching language if available
+        const voices = window.speechSynthesis.getVoices();
+        if (voices && voices.length > 0) {
+          if (voiceLang === 'ta-IN') {
+            const tamilVoice = voices.find((v) => v.lang.toLowerCase().includes('ta'));
+            if (tamilVoice) utterance.voice = tamilVoice;
+          } else {
+            const indianVoice = voices.find(
+              (v) =>
+                v.lang.toLowerCase().includes('en-in') ||
+                v.name.toLowerCase().includes('india')
+            );
+            if (indianVoice) utterance.voice = indianVoice;
+          }
+        }
+
+        let hasFinished = false;
+
+        const onSpeechFinish = () => {
+          if (hasFinished) return;
+          hasFinished = true;
+          if (speechFallbackTimerRef.current) clearTimeout(speechFallbackTimerRef.current);
+          if (!isActiveSessionRef.current) return;
+
+          // 250ms echo clearance buffer
+          echoTimeoutRef.current = setTimeout(() => {
+            proceedToMic();
+          }, 250);
+        };
+
+        utterance.onend = onSpeechFinish;
+        utterance.onerror = onSpeechFinish;
+
+        // CRITICAL FAILSAFE: If Chrome stalls or audio is muted at OS level,
+        // automatically activate mic within 2.5 to 4 seconds so the user is NEVER stuck!
+        const safeTimeoutDuration = Math.max(2000, Math.min(4500, text.length * 80));
+        speechFallbackTimerRef.current = setTimeout(() => {
+          if (!hasFinished) {
+            console.warn('SpeechSynthesis timeout: failsafe activating user mic');
+            onSpeechFinish();
+          }
+        }, safeTimeoutDuration);
+
+        window.speechSynthesis.speak(utterance);
+      } catch (err) {
+        console.warn('Speech synthesis error, activating mic directly:', err);
+        proceedToMic();
       }
-
-      // When AI finishes speaking:
-      utterance.onend = () => {
-        if (!isActiveSessionRef.current) return;
-
-        // 2. WAIT 400ms echo clearance buffer before enabling mic
-        echoTimeoutRef.current = setTimeout(() => {
-          if (!isActiveSessionRef.current) return;
-          if (onDone) {
-            onDone();
-          } else {
-            startUserMic();
-          }
-        }, 400);
-      };
-
-      utterance.onerror = () => {
-        if (!isActiveSessionRef.current) return;
-        echoTimeoutRef.current = setTimeout(() => {
-          if (!isActiveSessionRef.current) return;
-          if (onDone) {
-            onDone();
-          } else {
-            startUserMic();
-          }
-        }, 300);
-      };
-
-      window.speechSynthesis.speak(utterance);
     },
     [killRecognition, startUserMic, voiceLang]
   );
@@ -367,12 +408,23 @@ export function VoiceBillingBar({
     turnRef.current = 'IDLE';
 
     if (echoTimeoutRef.current) clearTimeout(echoTimeoutRef.current);
+    if (speechFallbackTimerRef.current) clearTimeout(speechFallbackTimerRef.current);
     if (typeof window !== 'undefined' && window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
     killRecognition();
     setInterimTranscript('');
   }, [killRecognition]);
+
+  // Force-start user mic immediately (Skip AI voice or bypass pause)
+  const forceStartUserMic = () => {
+    if (echoTimeoutRef.current) clearTimeout(echoTimeoutRef.current);
+    if (speechFallbackTimerRef.current) clearTimeout(speechFallbackTimerRef.current);
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    startUserMic();
+  };
 
   // Handle conversational speech input across states
   const handleFinalSpeech = useCallback(
@@ -670,7 +722,6 @@ export function VoiceBillingBar({
   handleFinalSpeechRef.current = handleFinalSpeech;
 
   // Main Action: Trigger Conversational Voice Assistant
-  // NEVER starts mic immediately — AI speaks first with mic OFF!
   const toggleListening = () => {
     if (isActiveSession) {
       stopVoiceSession();
@@ -763,13 +814,35 @@ export function VoiceBillingBar({
               </span>
             </div>
             <p className="text-xs text-emerald-200/80 mt-0.5">
-              Turn-based voice assistant: Mic automatically shuts off while AI speaks!
+              Turn-based voice assistant: Mic auto-activates with chime when AI finishes question!
             </p>
           </div>
         </div>
 
         {/* Action Controls & Language Selector */}
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Audio Speaker Mute Toggle: Allows silent ultra-fast mode or audio mode */}
+          <button
+            type="button"
+            onClick={() => {
+              const nextMute = !isAudioMuted;
+              setIsAudioMuted(nextMute);
+              isAudioMutedRef.current = nextMute;
+              if (nextMute && turn === 'AI_SPEAKING') {
+                forceStartUserMic();
+              }
+            }}
+            className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all flex items-center gap-1.5 ${
+              isAudioMuted
+                ? 'bg-rose-500/30 text-rose-300 border-rose-500/50'
+                : 'bg-white/10 text-emerald-300 border-white/20 hover:bg-white/20'
+            }`}
+            title={isAudioMuted ? 'Voice audio is muted (Mic opens instantly)' : 'Voice audio is active'}
+          >
+            {isAudioMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+            <span>{isAudioMuted ? 'Voice Muted 🔇' : 'AI Voice 🔊'}</span>
+          </button>
+
           {/* Language toggle: en-IN (Tanglish/English) vs ta-IN (Tamil) */}
           <select
             value={voiceLang}
@@ -823,22 +896,22 @@ export function VoiceBillingBar({
 
       {/* Guided Turn Status & Question Box */}
       <div className="bg-black/40 border border-emerald-500/30 rounded-xl p-3.5 space-y-2.5">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
           {/* Active Turn Indicator */}
           <div className="flex items-center gap-2 min-w-0">
             {turn === 'AI_SPEAKING' ? (
-              <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-amber-500/25 text-amber-200 border border-amber-400/40 text-xs font-black animate-pulse">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/25 text-amber-200 border border-amber-400/40 text-xs font-black animate-pulse">
                 <Volume2 className="w-4 h-4 text-amber-300 animate-bounce" />
                 <span>AI Speaking Question... (Mic Paused 🔇)</span>
               </div>
             ) : turn === 'LISTENING_FOR_USER' ? (
-              <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-emerald-500/25 text-emerald-200 border border-emerald-400/40 text-xs font-black">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/30 text-emerald-200 border border-emerald-400/50 text-xs font-black ring-2 ring-emerald-500/30">
                 <span className="w-2.5 h-2.5 bg-emerald-400 rounded-full animate-ping" />
                 <Mic className="w-4 h-4 text-emerald-300" />
                 <span>Mic Active — Speak Now 🎙️</span>
               </div>
             ) : turn === 'PROCESSING' ? (
-              <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-sky-500/25 text-sky-200 border border-sky-400/40 text-xs font-bold">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-sky-500/25 text-sky-200 border border-sky-400/40 text-xs font-bold">
                 <span className="w-2 h-2 bg-sky-400 rounded-full animate-spin" />
                 <span>Processing your answer...</span>
               </div>
@@ -850,30 +923,59 @@ export function VoiceBillingBar({
             )}
           </div>
 
-          {/* Repeat Question Button */}
-          {currentPrompt && isActiveSession && (
-            <button
-              type="button"
-              onClick={() => speakAssistant(currentPrompt)}
-              className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-300 hover:text-emerald-200 bg-white/10 hover:bg-white/20 px-2 py-1 rounded-lg transition-colors"
-              title="Repeat current question"
-            >
-              <RotateCcw className="w-3 h-3" />
-              <span>Repeat 🔁</span>
-            </button>
-          )}
+          {/* Action Shortcuts during turn */}
+          <div className="flex items-center gap-2">
+            {/* Quick Skip AI Speech button: User can bypass waiting and speak immediately */}
+            {turn === 'AI_SPEAKING' && (
+              <button
+                type="button"
+                onClick={forceStartUserMic}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-black bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-md transition-all active:scale-95"
+                title="Skip AI audio and open microphone immediately"
+              >
+                <FastForward className="w-3.5 h-3.5" />
+                <span>Speak Now 🎙️</span>
+              </button>
+            )}
+
+            {/* Repeat Question Button */}
+            {currentPrompt && isActiveSession && (
+              <button
+                type="button"
+                onClick={() => speakAssistant(currentPrompt)}
+                className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-300 hover:text-emerald-200 bg-white/10 hover:bg-white/20 px-2 py-1 rounded-lg transition-colors"
+                title="Repeat current question"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Repeat 🔁</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Current Active Question Spoken Aloud */}
         {currentPrompt && (
-          <div className="p-3 bg-emerald-950/70 rounded-xl border border-emerald-500/30 flex items-start gap-2.5">
-            <Volume2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-            <div className="text-xs font-bold text-emerald-100 leading-snug">
-              <span className="text-emerald-400 uppercase text-[10px] tracking-wider block font-black mb-0.5">
-                AI Question:
-              </span>
-              &ldquo;{currentPrompt}&rdquo;
+          <div className="p-3 bg-emerald-950/70 rounded-xl border border-emerald-500/30 flex items-start justify-between gap-2.5">
+            <div className="flex items-start gap-2.5 min-w-0">
+              <Volume2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+              <div className="text-xs font-bold text-emerald-100 leading-snug">
+                <span className="text-emerald-400 uppercase text-[10px] tracking-wider block font-black mb-0.5">
+                  AI Question:
+                </span>
+                &ldquo;{currentPrompt}&rdquo;
+              </div>
             </div>
+
+            {/* In-banner Quick Speak button */}
+            {turn === 'AI_SPEAKING' && (
+              <button
+                type="button"
+                onClick={forceStartUserMic}
+                className="flex-shrink-0 text-[11px] font-bold px-2 py-1 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 hover:bg-emerald-500/30"
+              >
+                Open Mic ➔
+              </button>
+            )}
           </div>
         )}
 
@@ -893,8 +995,8 @@ export function VoiceBillingBar({
             <p className="text-xs text-emerald-200/70 truncate">
               {isActiveSession
                 ? turn === 'AI_SPEAKING'
-                  ? 'Please listen to the question. The mic will turn on as soon as the assistant finishes.'
-                  : 'Speak clearly into your microphone...'
+                  ? 'Listening for AI question to end... Mic activates automatically or click "Speak Now 🎙️"'
+                  : 'Microphone is active! Speak your answer clearly...'
                 : 'Click "Start Voice Billing 🎙️" to begin interactive billing conversation'}
             </p>
           )}
@@ -1028,7 +1130,7 @@ export function VoiceBillingBar({
           </div>
           <ul className="space-y-1.5 text-[11px] list-disc list-inside text-emerald-200/90 leading-relaxed">
             <li>
-              <strong>Echo-Free Conversational Turn:</strong> The mic automatically stays off while the AI speaks questions. Once AI finishes speaking, the mic turns ON with a chime!
+              <strong>Instant Mic Activation:</strong> If you don&apos;t want to wait for AI audio to speak, simply tap <em>&ldquo;Speak Now 🎙️&rdquo;</em> or mute <em>&ldquo;AI Voice 🔊&rdquo;</em> to open the mic instantly!
             </li>
             <li>
               <strong>Indian Names Support:</strong> Names like <em>&ldquo;Mani Building&rdquo;</em> (even if speech recognition transcribes as <em>&ldquo;money building&rdquo;</em>) are automatically mapped to <strong>Mani Building</strong>.
