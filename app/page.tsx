@@ -18,6 +18,7 @@ import {
   MessageCircle,
   Edit2,
   Receipt,
+  Trash2,
 } from 'lucide-react';
 import { Purchase, DashboardStats, PaymentMode, ReceiptDetails } from '@/lib/types';
 import { formatINR } from '@/lib/calculations';
@@ -25,6 +26,7 @@ import { getPendingAgeText, getPendingDaysCount, formatShortDate, maskWhatsAppNu
 import { PaymentStatusBadge } from '@/components/StatusBadge';
 import { PaymentReceivedModal } from '@/components/PaymentReceivedModal';
 import { ReceiptModal } from '@/components/ReceiptModal';
+import { DeleteBillModal } from '@/components/DeleteBillModal';
 import { buildWhatsAppReminderText, buildWhatsAppThankYouText, getWhatsAppDirectUrl } from '@/lib/whatsapp-share';
 
 export default function DashboardPage() {
@@ -59,6 +61,33 @@ export default function DashboardPage() {
   const [activeReceipt, setActiveReceipt] = useState<ReceiptDetails | null>(null);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [paymentModalError, setPaymentModalError] = useState<string | null>(null);
+
+  // Delete bill modal state
+  const [deleteTarget, setDeleteTarget] = useState<Purchase | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/purchases/${deleteTarget.id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || 'Failed to delete purchase');
+      }
+      setDeleteTarget(null);
+      await fetchData();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to delete purchase';
+      setDeleteError(msg);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const fetchData = useCallback(async () => {
     try {
@@ -596,6 +625,16 @@ export default function DashboardPage() {
                               <span>Edit</span>
                             </Link>
 
+                            <button
+                              type="button"
+                              onClick={() => setDeleteTarget(purchase)}
+                              className="inline-flex items-center gap-1 px-2 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                              title="Delete this Sale Bill"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                              <span>Delete</span>
+                            </button>
+
                             {isPending ? (
                               <>
                                 <button
@@ -740,6 +779,16 @@ export default function DashboardPage() {
                           Edit
                         </Link>
 
+                        <button
+                          type="button"
+                          onClick={() => setDeleteTarget(purchase)}
+                          className="px-2 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                          title="Delete Bill"
+                        >
+                          <Trash2 className="w-3 h-3 text-rose-600" />
+                          <span>Delete</span>
+                        </button>
+
                         {isPending ? (
                           <>
                             <button
@@ -816,6 +865,20 @@ export default function DashboardPage() {
           receipt={activeReceipt}
           pharmacyName={pharmacyName}
           upiId={upiId}
+        />
+      )}
+
+      {/* Delete Bill Confirmation Modal */}
+      {deleteTarget && (
+        <DeleteBillModal
+          isOpen={Boolean(deleteTarget)}
+          onClose={() => setDeleteTarget(null)}
+          onConfirm={handleConfirmDelete}
+          isDeleting={isDeleting}
+          billNumber={deleteTarget.bill_number || undefined}
+          customerName={deleteTarget.customer?.name}
+          amount={Number(deleteTarget.amount_payable || 0)}
+          error={deleteError}
         />
       )}
 

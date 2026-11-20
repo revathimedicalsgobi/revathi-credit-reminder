@@ -23,6 +23,7 @@ import { maskWhatsAppNumber } from '@/lib/utils';
 import { PurchaseSummaryCard } from '@/components/PurchaseSummaryCard';
 import { MedicineNameScannerModal, ScannerMode } from '@/components/MedicineNameScannerModal';
 import { VoiceBillingBar } from '@/components/VoiceBillingBar';
+import { DeleteBillModal } from '@/components/DeleteBillModal';
 import { Purchase } from '@/lib/types';
 
 interface ItemRow {
@@ -57,6 +58,32 @@ function EditPurchaseContent() {
   const [loading, setLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  // Delete modal state
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const handleDeleteBill = async () => {
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/purchases/${purchaseId}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || 'Failed to delete bill');
+      }
+      setShowDeleteModal(false);
+      router.push('/?deleted=true');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to delete bill';
+      setDeleteError(msg);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   // Scanner Modal state
   const [scannerModal, setScannerModal] = useState<{ isOpen: boolean; itemIndex: number; mode: ScannerMode }>({
@@ -333,6 +360,19 @@ function EditPurchaseContent() {
               Modify customer details, change items, adjust discounts, and recalculate totals.
             </p>
           </div>
+        </div>
+
+        {/* Delete Bill Header Button */}
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowDeleteModal(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 active:bg-rose-200 border border-rose-200 rounded-xl shadow-xs transition-all cursor-pointer"
+            title="Delete this Bill permanently"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+            <span>Delete Bill</span>
+          </button>
         </div>
       </div>
 
@@ -729,6 +769,18 @@ function EditPurchaseContent() {
         onSelectBothValues={handleSelectBothValues}
         itemIndex={scannerModal.itemIndex}
         initialMode={scannerModal.mode}
+      />
+
+      {/* Delete Bill Confirmation Modal */}
+      <DeleteBillModal
+        isOpen={showDeleteModal}
+        onClose={() => setShowDeleteModal(false)}
+        onConfirm={handleDeleteBill}
+        isDeleting={isDeleting}
+        billNumber={billNumber || undefined}
+        customerName={customerName}
+        amount={calculation.amount_payable}
+        error={deleteError}
       />
     </div>
   );

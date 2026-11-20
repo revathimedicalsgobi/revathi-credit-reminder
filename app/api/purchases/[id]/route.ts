@@ -367,6 +367,12 @@ export async function DELETE(
     const supabase = createAdminClient();
     const purchaseId = params.id;
 
+    // 1. Delete associated child records first to ensure clean cascade
+    await supabase.from('purchase_items').delete().eq('purchase_id', purchaseId);
+    await supabase.from('reminder_logs').delete().eq('purchase_id', purchaseId);
+    await supabase.from('audit_logs').delete().eq('purchase_id', purchaseId);
+
+    // 2. Delete the purchase record
     const { error } = await supabase
       .from('purchases')
       .delete()
