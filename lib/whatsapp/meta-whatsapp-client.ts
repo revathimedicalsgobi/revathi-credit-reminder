@@ -130,7 +130,7 @@ ${itemsText}
 
 📌 *Previous Unpaid Credit (Date-Wise):*
 ${dateWiseList ? dateWiseList + '\n' : ''}• *Previous Outstanding:* ${formatINR(previousBal)}
-• *Today's New Purchase:* ${formattedAmount}
+• *Today's New Sale Bill:* ${formattedAmount}
 
 ━━━━━━━━━━━━━━━━━━━━━━━
 🔴 *TOTAL CUMULATIVE BALANCE DUE:* *${formatINR(cumulativeTotal)}*
@@ -142,12 +142,12 @@ Thank you for choosing *${payload.pharmacyName}*! 🙏`;
       textBody = 
 `━━━━━━━━━━━━━━━━━━━━━━━
 🏥 *${payload.pharmacyName}*
-📄 *PURCHASE SUMMARY*
+📄 *SALE BILL SUMMARY*
 ━━━━━━━━━━━━━━━━━━━━━━━
 
 Hello *${payload.customerName}*,
 
-Here is your purchase summary from *${payload.pharmacyName}*:
+Here is your sale bill summary from *${payload.pharmacyName}*:
 
 📅 *Date:* ${formattedDate}
 
@@ -193,7 +193,7 @@ Thank you for your visit! 🙏`;
 
 Hello *${payload.customerName}*,
 
-This is a gentle reminder regarding your pending payment for the purchase on *${formattedDate}*.
+This is a gentle reminder regarding your pending payment for the bill on *${formattedDate}*.
 
 ⏳ *Pending for:* ${daysLabel}
 💰 *Amount Pending:* ${formattedAmount}

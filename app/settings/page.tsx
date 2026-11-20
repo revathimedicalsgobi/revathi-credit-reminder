@@ -157,7 +157,7 @@ export default function SettingsPage() {
                 required
                 value={settings.display_name}
                 onChange={(e) => setSettings({ ...settings, display_name: e.target.value })}
-                placeholder="e.g. Purchase Summary Manager"
+                placeholder="e.g. Sales & Credit Manager"
                 className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50/50 focus:bg-white"
               />
             </div>
@@ -183,7 +183,7 @@ export default function SettingsPage() {
                 className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50/50 focus:bg-white font-mono"
               />
               <span className="text-[11px] text-slate-400 mt-1 block">
-                Shown on Purchase Summaries and included in WhatsApp messages.
+                Shown on Sale Bill Summaries and included in WhatsApp messages.
               </span>
             </div>
 

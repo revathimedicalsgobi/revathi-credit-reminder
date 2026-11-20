@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
         {
           text: `You are the smart AI Business Assistant for Revathi Medicals & Distributors / Pharmacy Credit Manager.
 The pharmacy owner (Boopathy) interacts with you via voice and text to:
-1. Create new purchase bills (create_bill)
+1. Create new sales bills (create_bill)
 2. Check customer pending credit / balances (get_customer_balance)
 3. Record customer payments received (record_payment)
 4. View business summary / today's sales and collections (get_business_stats)

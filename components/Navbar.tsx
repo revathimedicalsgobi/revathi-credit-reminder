@@ -15,6 +15,7 @@ import {
   Menu,
   X,
   Sparkles,
+  FileText,
 } from 'lucide-react';
 
 import { createClient } from '@/lib/supabase/client';
@@ -75,7 +76,7 @@ export function Navbar() {
                   {pharmacyName}
                 </span>
                 <span className="text-[10px] sm:text-xs font-medium text-emerald-600 flex items-center gap-1">
-                  <ShieldCheck className="w-3 h-3" /> Purchase & Credit Manager
+                  <ShieldCheck className="w-3 h-3" /> Sales & Credit Manager
                 </span>
               </div>
             </Link>
@@ -133,6 +134,18 @@ export function Navbar() {
 
 
             <Link
+              href="/reports"
+              className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-colors ${
+                pathname.startsWith('/reports')
+                  ? 'bg-emerald-50 text-emerald-700 font-bold'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <FileText className="w-4 h-4 text-emerald-600" />
+              <span>Reports & Statements</span>
+            </Link>
+
+            <Link
               href="/settings"
               className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-colors ${
                 pathname === '/settings'
@@ -165,7 +178,7 @@ export function Navbar() {
               className="flex items-center space-x-1.5 sm:space-x-2 px-3 sm:px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-lg text-xs sm:text-sm font-semibold shadow-sm shadow-emerald-600/30 transition-all transform hover:-translate-y-0.5 active:translate-y-0"
             >
               <PlusCircle className="w-4 h-4" />
-              <span>New Bill</span>
+              <span>+ New Sale</span>
             </Link>
 
             {userEmail && (
@@ -255,6 +268,19 @@ export function Navbar() {
             </Link>
 
             <Link
+              href="/reports"
+              onClick={() => setIsMobileMenuOpen(false)}
+              className={`flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                pathname.startsWith('/reports')
+                  ? 'bg-emerald-50 text-emerald-700'
+                  : 'text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <FileText className="w-4 h-4 text-emerald-600" />
+              <span>Reports & Statements</span>
+            </Link>
+
+            <Link
               href="/settings"
               onClick={() => setIsMobileMenuOpen(false)}
               className={`flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
@@ -286,7 +312,7 @@ export function Navbar() {
               className="flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-sm font-bold text-emerald-800 bg-emerald-50/70 border border-emerald-200"
             >
               <PlusCircle className="w-4 h-4 text-emerald-600" />
-              <span>+ Record New Purchase</span>
+              <span>+ Record New Sale</span>
             </Link>
 
             {userEmail && (

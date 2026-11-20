@@ -13,6 +13,7 @@ interface PaymentReceivedModalProps {
   onConfirm: (paymentData: { amount: number; payment_mode: PaymentMode; notes?: string }) => Promise<any> | any;
   customerName: string;
   whatsappNumber?: string;
+  billNumber?: string;
   amountPayable: number;
   paidAmount?: number;
   balanceDue?: number;
@@ -21,6 +22,7 @@ interface PaymentReceivedModalProps {
   pharmacyName?: string;
   isProcessing: boolean;
   errorMessage?: string | null;
+  onShowReceipt?: (receipt: any) => void;
 }
 
 export function PaymentReceivedModal({
@@ -29,6 +31,7 @@ export function PaymentReceivedModal({
   onConfirm,
   customerName,
   whatsappNumber,
+  billNumber,
   amountPayable,
   paidAmount = 0,
   balanceDue,
@@ -37,6 +40,7 @@ export function PaymentReceivedModal({
   pharmacyName = 'Revathi Medicals & Distributors',
   isProcessing,
   errorMessage,
+  onShowReceipt,
 }: PaymentReceivedModalProps) {
   const currentDue = balanceDue !== undefined ? balanceDue : roundToTwoDecimals(Math.max(0, amountPayable - paidAmount));
   
@@ -92,7 +96,25 @@ export function PaymentReceivedModal({
 
     try {
       if (isFullSettlement) triggerConfetti();
-      await onConfirm(payload);
+      const resData = await onConfirm(payload);
+      if (onShowReceipt && resData?.receipt) {
+        onShowReceipt(resData.receipt);
+      }
+    } catch {
+      // Handled in parent
+    }
+  };
+
+  const handleConfirmAndReceipt = async () => {
+    const payload = validateAndGetPayload();
+    if (!payload) return;
+
+    try {
+      if (isFullSettlement) triggerConfetti();
+      const resData = await onConfirm(payload);
+      if (onShowReceipt && resData?.receipt) {
+        onShowReceipt(resData.receipt);
+      }
     } catch {
       // Handled in parent
     }
@@ -167,6 +189,11 @@ export function PaymentReceivedModal({
                   Customer
                 </span>
                 <h4 className="text-base font-extrabold text-slate-900">{customerName}</h4>
+                {billNumber && (
+                  <span className="inline-block mt-0.5 text-[11px] font-mono font-bold text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded border border-emerald-300">
+                    {billNumber}
+                  </span>
+                )}
               </div>
               <div className="text-right">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
@@ -365,9 +392,20 @@ export function PaymentReceivedModal({
 
           <button
             type="button"
+            onClick={handleConfirmAndReceipt}
+            disabled={isProcessing}
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-xs font-bold text-slate-900 bg-emerald-100 hover:bg-emerald-200 active:bg-emerald-300 border border-emerald-300 rounded-xl transition-all disabled:opacity-60 cursor-pointer"
+            title="Record payment and immediately open printable receipt slip"
+          >
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+            <span>Record + Receipt Slip</span>
+          </button>
+
+          <button
+            type="button"
             onClick={handleConfirmAndWhatsApp}
             disabled={isProcessing}
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-xl shadow-md shadow-emerald-600/30 transition-all disabled:opacity-60"
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-xl shadow-md shadow-emerald-600/30 transition-all disabled:opacity-60 cursor-pointer"
           >
             {isProcessing ? (
               <>

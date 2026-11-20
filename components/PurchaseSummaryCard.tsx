@@ -27,6 +27,7 @@ export interface PurchaseSummaryItem {
 
 interface PurchaseSummaryCardProps {
   pharmacyName?: string;
+  billNumber?: string | null;
   customerName: string;
   whatsappNumber?: string;
   purchaseDate: string | Date;
@@ -54,6 +55,7 @@ interface PurchaseSummaryCardProps {
 
 export function PurchaseSummaryCard({
   pharmacyName = 'Revathi Medicals & Distributors',
+  billNumber,
   customerName,
   whatsappNumber,
   purchaseDate,
@@ -89,7 +91,7 @@ export function PurchaseSummaryCard({
     try {
       setIsExporting(true);
       const safeName = (customerName || 'Customer').replace(/[^a-zA-Z0-9]/g, '_');
-      await downloadReceiptAsJpeg(cardEl, `Purchase_${safeName}_${Date.now()}.jpg`);
+      await downloadReceiptAsJpeg(cardEl, `Sale_${safeName}_${Date.now()}.jpg`);
       setToastMsg('Receipt JPEG downloaded successfully!');
       setTimeout(() => setToastMsg(null), 4000);
     } catch (err) {
@@ -238,7 +240,7 @@ export function PurchaseSummaryCard({
             </h2>
           </div>
           <p className="text-xs sm:text-sm font-extrabold tracking-widest text-emerald-200 uppercase">
-            PURCHASE SUMMARY
+            SALE BILL SUMMARY
           </p>
 
           {/* Top Quick Print Action */}
@@ -247,7 +249,7 @@ export function PurchaseSummaryCard({
               onClick={handlePrint}
               type="button"
               className="no-print absolute top-4 right-4 inline-flex items-center gap-1.5 px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-xl text-xs font-bold backdrop-blur-sm transition-all shadow-sm"
-              title="Print Purchase Summary"
+              title="Print Sale Bill Summary"
             >
               <Printer className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Print</span>
@@ -255,7 +257,7 @@ export function PurchaseSummaryCard({
           )}
         </div>
 
-        {/* Customer Details Header (with Highlighted Customer Name) */}
+        {/* Customer Details Header (with Highlighted Customer Name & Bill Number) */}
         <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="space-y-1">
             <div className="flex items-center gap-2 flex-wrap">
@@ -265,6 +267,11 @@ export function PurchaseSummaryCard({
               <span className="text-base sm:text-lg font-black text-emerald-950 bg-emerald-100/90 border border-emerald-300 px-3 py-0.5 rounded-lg shadow-2xs">
                 {customerName || 'Customer'}
               </span>
+              {billNumber && (
+                <span className="text-xs font-mono font-bold text-slate-800 bg-white border border-slate-300 px-2.5 py-0.5 rounded-md shadow-2xs">
+                  Bill: {billNumber}
+                </span>
+              )}
             </div>
             {whatsappNumber && (
               <div className="text-xs text-slate-600 font-mono font-medium flex items-center gap-1">
@@ -404,7 +411,7 @@ export function PurchaseSummaryCard({
                 <span>{formatINR(previousBalance)}</span>
               </div>
               <div className="flex items-center justify-between text-xs text-slate-700">
-                <span>➕ Current Purchase {paidAmount > 0 ? 'Pending Balance' : 'Bill'}:</span>
+                <span>➕ Current Sale {paidAmount > 0 ? 'Pending Balance' : 'Bill'}:</span>
                 <span className="font-bold">{formatINR(balanceDue !== undefined ? balanceDue : Math.max(0, amountPayable - paidAmount))}</span>
               </div>
             </div>

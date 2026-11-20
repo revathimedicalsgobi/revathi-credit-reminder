@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { getWhatsAppProvider } from '@/lib/whatsapp';
 import { RecordPaymentSchema } from '@/lib/validations';
 import { roundToTwoDecimals } from '@/lib/calculations';
-import { enrichPurchaseWithPayments } from '@/lib/payment-helpers';
+import { enrichPurchaseWithPayments, generateReceiptNumber } from '@/lib/payment-helpers';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -94,9 +94,12 @@ export async function POST(
       );
     }
 
-    // 5. Record structured Payment in Audit Logs
+    // 5. Generate Receipt Number and record structured Payment in Audit Logs
+    const receiptNumber = generateReceiptNumber(purchase.id);
+
     const paymentData = {
       type: 'PAYMENT',
+      receipt_number: receiptNumber,
       amount: paymentAmount,
       payment_mode: payment_mode,
       notes: notes || (isFullyPaid ? 'Full payment received' : `Partial payment of ₹${paymentAmount}`),
@@ -112,6 +115,21 @@ export async function POST(
       new_status: isFullyPaid ? 'PAID' : 'PARTIAL_PAYMENT',
       notes: JSON.stringify(paymentData),
     });
+
+    // Also attempt inserting into dedicated payments table if present
+    try {
+      await supabase.from('payments').insert({
+        purchase_id: purchaseId,
+        customer_id: purchase.customer_id,
+        receipt_number: receiptNumber,
+        amount: paymentAmount,
+        payment_mode: payment_mode,
+        notes: notes || null,
+        paid_at: paymentTimestamp,
+      });
+    } catch {
+      // ignore if table not migrated yet
+    }
 
     // 6. Fetch Pharmacy Settings
     const { data: settings } = await supabase.from('settings').select('*').limit(1).maybeSingle();
@@ -200,6 +218,22 @@ export async function POST(
       totalOutstandingBalance,
       otherPendingBillsCount,
       isFullyPaid,
+      receipt: {
+        receipt_number: receiptNumber,
+        receipt_date: paymentTimestamp,
+        purchase_id: purchaseId,
+        bill_number: enrichedFinal?.bill_number || `BILL-${purchaseId.slice(0, 4).toUpperCase()}`,
+        customer_name: purchase.customer?.name || 'Customer',
+        whatsapp_number: purchase.customer?.whatsapp_number || '',
+        payment_mode: payment_mode,
+        amount_received: paymentAmount,
+        total_bill_amount: totalPayable,
+        previous_paid: previousPaid,
+        new_total_paid: newTotalPaid,
+        remaining_balance: newRemainingBalance,
+        pharmacy_name: pharmacyName,
+        notes: notes || null,
+      },
       whatsapp: whatsappResult,
     });
 

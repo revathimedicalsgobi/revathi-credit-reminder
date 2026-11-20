@@ -20,11 +20,12 @@ import {
   Receipt,
   Check,
 } from 'lucide-react';
-import { Purchase, PaymentMode } from '@/lib/types';
+import { Purchase, PaymentMode, ReceiptDetails } from '@/lib/types';
 import { formatINR } from '@/lib/calculations';
 import { getPendingAgeText, getPendingDaysCount, formatDisplayDate, formatShortDate } from '@/lib/utils';
 import { PurchaseSummaryCard } from '@/components/PurchaseSummaryCard';
 import { PaymentReceivedModal } from '@/components/PaymentReceivedModal';
+import { ReceiptModal } from '@/components/ReceiptModal';
 import { PaymentStatusBadge } from '@/components/StatusBadge';
 import {
   buildWhatsAppReminderText,
@@ -55,15 +56,16 @@ function PurchaseDetailContent() {
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(
     isJustCreated
-      ? 'Purchase bill recorded successfully!'
+      ? 'Sale bill recorded successfully!'
       : isJustUpdated
-      ? 'Purchase bill updated successfully!'
+      ? 'Sale bill updated successfully!'
       : null
   );
 
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [paymentModalError, setPaymentModalError] = useState<string | null>(null);
+  const [activeReceipt, setActiveReceipt] = useState<ReceiptDetails | null>(null);
 
   // Fetch settings for branding
   useEffect(() => {
@@ -85,7 +87,7 @@ function PurchaseDetailContent() {
       const data = await res.json();
 
       if (!res.ok || !data.purchase) {
-        throw new Error(data?.error || 'Purchase not found');
+        throw new Error(data?.error || 'Sale record not found');
       }
 
       setPurchase(data.purchase);
@@ -93,7 +95,7 @@ function PurchaseDetailContent() {
       setCumulativeTotal(Number(data.cumulativeTotal || (data.purchase?.balance_due ?? data.purchase?.amount_payable ?? 0)));
       setDateWisePendingBills(data.dateWisePendingBills || []);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to load purchase details';
+      const msg = err instanceof Error ? err.message : 'Failed to load sale details';
       setError(msg);
     } finally {
       setLoading(false);
@@ -269,7 +271,7 @@ function PurchaseDetailContent() {
 
       const data = await res.json();
       if (res.ok && data.success) {
-        showToast('success', `✅ Purchase summary & statement sent automatically to ${customerName}!`);
+        showToast('success', `✅ Sale bill summary & statement sent automatically to ${customerName}!`);
       } else {
         showToast('error', `❌ Failed: ${data?.error || 'Gateway error'}`);
       }
@@ -313,7 +315,7 @@ function PurchaseDetailContent() {
     return (
       <div className="py-24 text-center text-slate-400 text-sm flex flex-col items-center justify-center gap-2">
         <div className="w-8 h-8 border-3 border-emerald-500/20 border-t-emerald-600 rounded-full animate-spin" />
-        <span>Loading purchase details...</span>
+        <span>Loading sale details...</span>
       </div>
     );
   }
@@ -324,8 +326,8 @@ function PurchaseDetailContent() {
         <div className="w-12 h-12 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
           <AlertCircle className="w-6 h-6" />
         </div>
-        <h2 className="text-lg font-bold text-slate-900">Purchase Not Found</h2>
-        <p className="text-xs text-slate-500">{error || 'The requested purchase could not be retrieved.'}</p>
+        <h2 className="text-lg font-bold text-slate-900">Sale Record Not Found</h2>
+        <p className="text-xs text-slate-500">{error || 'The requested sale record could not be retrieved.'}</p>
         <Link
           href="/"
           className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-xs font-semibold rounded-xl"
@@ -359,7 +361,12 @@ function PurchaseDetailContent() {
           </Link>
           <div>
             <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2 flex-wrap">
-              <span>Purchase for {purchase.customer?.name}</span>
+              <span>Sale for {purchase.customer?.name}</span>
+              {purchase.bill_number && (
+                <span className="text-xs sm:text-sm font-mono font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2.5 py-0.5 rounded-lg">
+                  {purchase.bill_number}
+                </span>
+              )}
               <PaymentStatusBadge status={purchase.payment_status} />
             </h1>
             <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-2">
@@ -473,6 +480,7 @@ function PurchaseDetailContent() {
         <div className="lg:col-span-7">
           <PurchaseSummaryCard
             pharmacyName={pharmacyName}
+            billNumber={purchase.bill_number}
             customerName={purchase.customer?.name || 'Customer'}
             whatsappNumber={purchase.customer?.whatsapp_number}
             purchaseDate={purchase.purchase_date}
@@ -616,10 +624,35 @@ function PurchaseDetailContent() {
                       </span>
                     </div>
 
-                    <div className="flex justify-between text-slate-500 text-[11px] pt-0.5">
+                    <div className="flex justify-between items-center text-slate-500 text-[11px] pt-1 border-t border-emerald-100/60">
                       <span>{formatDisplayDate(pay.paid_at)}</span>
-                      {pay.notes && <span className="italic text-slate-600 truncate max-w-[180px]">{pay.notes}</span>}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveReceipt({
+                            receipt_number: pay.receipt_number || `RCP-${pay.id.slice(0, 4).toUpperCase()}`,
+                            receipt_date: pay.paid_at,
+                            purchase_id: purchase.id,
+                            bill_number: purchase.bill_number || `BILL-${purchase.id.slice(0, 4).toUpperCase()}`,
+                            customer_name: purchase.customer?.name || 'Customer',
+                            whatsapp_number: purchase.customer?.whatsapp_number || '',
+                            payment_mode: pay.payment_mode || 'CASH',
+                            amount_received: pay.amount,
+                            total_bill_amount: Number(purchase.amount_payable),
+                            previous_paid: Math.max(0, Number(purchase.amount_payable) - pay.amount),
+                            new_total_paid: Number(purchase.paid_amount || purchase.amount_payable),
+                            remaining_balance: Number(purchase.balance_due || 0),
+                            pharmacy_name: pharmacyName,
+                            notes: pay.notes,
+                          });
+                        }}
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 hover:text-emerald-900 bg-white hover:bg-emerald-100 px-2 py-0.5 rounded border border-emerald-200 transition-colors cursor-pointer"
+                      >
+                        <Receipt className="w-3 h-3 text-emerald-600" />
+                        <span>View Receipt Slip</span>
+                      </button>
                     </div>
+                    {pay.notes && <div className="italic text-slate-600 text-[10px] truncate">{pay.notes}</div>}
                   </div>
                 ))}
               </div>
@@ -694,6 +727,7 @@ function PurchaseDetailContent() {
           onConfirm={handleConfirmPayment}
           customerName={purchase.customer?.name || 'Customer'}
           whatsappNumber={purchase.customer?.whatsapp_number || ''}
+          billNumber={purchase.bill_number || undefined}
           amountPayable={totalAmount}
           paidAmount={paidAmount}
           balanceDue={balanceDue}
@@ -702,6 +736,18 @@ function PurchaseDetailContent() {
           pharmacyName={pharmacyName}
           isProcessing={isProcessingPayment}
           errorMessage={paymentModalError}
+          onShowReceipt={(rcp) => setActiveReceipt(rcp)}
+        />
+      )}
+
+      {/* Official Payment Receipt Slip Modal */}
+      {activeReceipt && (
+        <ReceiptModal
+          isOpen={Boolean(activeReceipt)}
+          onClose={() => setActiveReceipt(null)}
+          receipt={activeReceipt}
+          pharmacyName={pharmacyName}
+          upiId={upiId}
         />
       )}
 

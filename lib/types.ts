@@ -29,6 +29,7 @@ export interface PaymentRecord {
   purchase_id: string;
   amount: number;
   payment_mode?: PaymentMode | string;
+  receipt_number?: string | null;
   notes?: string | null;
   paid_at: string;
   created_at?: string;
@@ -48,6 +49,7 @@ export interface ReminderLog {
 
 export interface Purchase {
   id: string;
+  bill_number?: string | null;
   customer_id: string;
   purchase_date: string;
   gross_total: number;
@@ -100,6 +102,7 @@ export interface PurchaseInputItem {
 }
 
 export interface CreatePurchaseInput {
+  bill_number?: string;
   customer_name: string;
   whatsapp_number: string;
   items: PurchaseInputItem[];
@@ -107,11 +110,101 @@ export interface CreatePurchaseInput {
 }
 
 export interface UpdatePurchaseInput {
+  bill_number?: string;
   customer_name: string;
   whatsapp_number: string;
   purchase_date?: string;
   items: PurchaseInputItem[];
   send_whatsapp?: boolean;
+}
+
+export interface ReceiptDetails {
+  receipt_number: string;
+  receipt_date: string;
+  purchase_id: string;
+  bill_number: string;
+  customer_name: string;
+  whatsapp_number: string;
+  payment_mode: string;
+  amount_received: number;
+  total_bill_amount: number;
+  previous_paid: number;
+  new_total_paid: number;
+  remaining_balance: number;
+  pharmacy_name: string;
+  notes?: string | null;
+}
+
+export interface CustomerReportItem {
+  id: string;
+  name: string;
+  whatsapp_number: string;
+  total_bills_count: number;
+  total_billed: number;
+  total_paid: number;
+  outstanding_balance: number;
+  last_bill_date: string | null;
+  last_payment_date: string | null;
+  status: 'SETTLED' | 'PENDING' | 'OVERDUE';
+}
+
+export interface BillReportItem {
+  id: string;
+  bill_number: string;
+  purchase_date: string;
+  customer_id: string;
+  customer_name: string;
+  whatsapp_number: string;
+  items_count: number;
+  items_summary: string;
+  gross_total: number;
+  total_discount: number;
+  amount_payable: number;
+  paid_amount: number;
+  balance_due: number;
+  payment_status: PaymentStatus;
+  payment_received_at?: string | null;
+}
+
+export interface PaymentReportItem {
+  id: string;
+  receipt_number: string;
+  paid_at: string;
+  purchase_id: string;
+  bill_number: string;
+  customer_name: string;
+  whatsapp_number: string;
+  amount: number;
+  payment_mode: string;
+  notes?: string | null;
+}
+
+export interface AgingReportBucket {
+  bracket: '0_7_DAYS' | '8_15_DAYS' | '16_30_DAYS' | 'OVER_30_DAYS';
+  title: string;
+  description: string;
+  bills_count: number;
+  customers_count: number;
+  total_amount: number;
+  bills: Array<{
+    id: string;
+    bill_number: string;
+    customer_name: string;
+    whatsapp_number: string;
+    purchase_date: string;
+    days_pending: number;
+    amount_payable: number;
+    balance_due: number;
+  }>;
+}
+
+export interface ProductReportItem {
+  item_name: string;
+  total_quantity: number;
+  total_gross: number;
+  total_discount: number;
+  total_net: number;
+  bills_count: number;
 }
 
 export interface DashboardStats {

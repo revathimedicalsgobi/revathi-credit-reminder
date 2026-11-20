@@ -23,6 +23,7 @@ import {
   ScanLine,
 } from 'lucide-react';
 import { calculatePurchaseSummary, formatINR } from '@/lib/calculations';
+import { generateNewBillNumber } from '@/lib/payment-helpers';
 import { isValidWhatsAppNumber, normalizeWhatsAppNumber } from '@/lib/validations';
 import { maskWhatsAppNumber } from '@/lib/utils';
 import { PurchaseSummaryCard } from '@/components/PurchaseSummaryCard';
@@ -65,6 +66,7 @@ function NewPurchaseContent() {
   const customerDropdownRef = useRef<HTMLDivElement>(null);
 
   // Customer Form State
+  const [billNumber, setBillNumber] = useState<string>(() => generateNewBillNumber());
   const [customerName, setCustomerName] = useState(searchParams.get('name') || '');
   const [whatsappNumber, setWhatsappNumber] = useState(searchParams.get('phone') || '');
   const [sendWhatsApp, setSendWhatsApp] = useState(true);
@@ -117,7 +119,10 @@ function NewPurchaseContent() {
     setScannerModal((prev) => ({ ...prev, isOpen: false }));
   };
 
-  const handleSelectBothValues = (brandName: string, mrp: string) => {
+  const handleSelectBothValues = (brandName: string, mrp: string, scannedBillNumber?: string) => {
+    if (scannedBillNumber && scannedBillNumber.trim()) {
+      setBillNumber(scannedBillNumber.trim());
+    }
     const targetIndex = scannerModal.itemIndex;
     if (targetIndex >= 0 && targetIndex < items.length) {
       const targetId = items[targetIndex].id;
@@ -381,6 +386,7 @@ function NewPurchaseContent() {
 
     try {
       const payload = {
+        bill_number: billNumber.trim() || undefined,
         customer_name: customerName.trim(),
         whatsapp_number: whatsappNumber.trim(),
         send_whatsapp: sendWhatsApp,
@@ -422,10 +428,10 @@ function NewPurchaseContent() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-            Record New Purchase
+            Record New Sale
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-            Enter purchase items, auto-calculate summary, and send WhatsApp reminder.
+            Enter sale items, auto-calculate summary, and send WhatsApp bill reminder.
           </p>
         </div>
       </div>
@@ -447,8 +453,31 @@ function NewPurchaseContent() {
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
                   <User className="w-4 h-4 text-emerald-600" />
-                  Customer Details
+                  Customer & Bill Details
                 </h2>
+              </div>
+
+              {/* Bill Number Input */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-1 flex items-center justify-between">
+                  <span>Bill / Invoice No.</span>
+                  <button
+                    type="button"
+                    onClick={() => setBillNumber(generateNewBillNumber())}
+                    className="text-[10px] text-emerald-600 hover:text-emerald-700 font-bold hover:underline"
+                  >
+                    ↺ Auto-generate
+                  </button>
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="e.g. BILL-2611-1042"
+                    value={billNumber}
+                    onChange={(e) => setBillNumber(e.target.value)}
+                    className="w-full px-3 py-2 text-xs font-mono font-bold rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white text-slate-900"
+                  />
+                </div>
               </div>
 
               {/* Searchable Unified Customer Combobox */}
@@ -543,12 +572,12 @@ function NewPurchaseContent() {
               )}
             </div>
 
-            {/* 2. Purchase Items Section */}
+            {/* 2. Sale Items Section */}
             <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
                   <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                  Purchase Items ({items.length})
+                  Sale Items ({items.length})
                 </h2>
 
                 <button
@@ -725,7 +754,7 @@ function NewPurchaseContent() {
                   className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500"
                 />
                 <span className="text-xs font-semibold text-slate-700">
-                  Send Purchase Summary via WhatsApp upon confirmation
+                  Send Sale Bill Summary via WhatsApp upon confirmation
                 </span>
               </label>
 
@@ -734,7 +763,7 @@ function NewPurchaseContent() {
                 className="w-full flex items-center justify-center gap-2 py-3.5 px-6 rounded-xl text-base font-extrabold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 shadow-lg shadow-emerald-600/30 transition-all transform hover:-translate-y-0.5"
               >
                 <Sparkles className="w-5 h-5" />
-                <span>PROCESS PURCHASE ({formatINR(calculation.amount_payable)})</span>
+                <span>PROCESS SALE ({formatINR(calculation.amount_payable)})</span>
               </button>
             </div>
           </form>
@@ -754,6 +783,7 @@ function NewPurchaseContent() {
 
             <PurchaseSummaryCard
               pharmacyName={pharmacyName}
+              billNumber={billNumber}
               customerName={customerName || 'Customer'}
               whatsappNumber={whatsappNumber ? normalizeWhatsAppNumber(whatsappNumber) : ''}
               purchaseDate={new Date()}

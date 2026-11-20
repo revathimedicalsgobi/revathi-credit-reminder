@@ -43,6 +43,7 @@ function EditPurchaseContent() {
   const [paymentQrUrl, setPaymentQrUrl] = useState<string | null>(null);
 
   // Form State
+  const [billNumber, setBillNumber] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [whatsappNumber, setWhatsappNumber] = useState('');
   const [purchaseDate, setPurchaseDate] = useState('');
@@ -87,7 +88,10 @@ function EditPurchaseContent() {
     setScannerModal((prev) => ({ ...prev, isOpen: false }));
   };
 
-  const handleSelectBothValues = (brandName: string, mrp: string) => {
+  const handleSelectBothValues = (brandName: string, mrp: string, scannedBillNumber?: string) => {
+    if (scannedBillNumber && scannedBillNumber.trim()) {
+      setBillNumber(scannedBillNumber.trim());
+    }
     const targetIndex = scannerModal.itemIndex;
     if (targetIndex >= 0 && targetIndex < items.length) {
       const targetId = items[targetIndex].id;
@@ -141,6 +145,7 @@ function EditPurchaseContent() {
       }
 
       const p: Purchase = data.purchase;
+      setBillNumber(p.bill_number || '');
       setCustomerName(p.customer?.name || '');
       setWhatsappNumber(p.customer?.whatsapp_number || '');
       setPaidAmount(Number(p.paid_amount || 0));
@@ -262,6 +267,7 @@ function EditPurchaseContent() {
 
     try {
       const payload = {
+        bill_number: billNumber.trim() || undefined,
         customer_name: customerName.trim(),
         whatsapp_number: whatsappNumber.trim(),
         purchase_date: purchaseDate ? new Date(purchaseDate).toISOString() : undefined,
@@ -313,13 +319,13 @@ function EditPurchaseContent() {
           <Link
             href={`/purchases/${purchaseId}`}
             className="p-2 rounded-xl border border-slate-200 hover:bg-white text-slate-600 transition-colors"
-            title="Cancel and return to purchase summary"
+            title="Cancel and return to sale summary"
           >
             <ArrowLeft className="w-4 h-4" />
           </Link>
           <div>
             <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-              Edit Purchase Bill
+              Edit Sale Bill
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
               Modify customer details, change items, adjust discounts, and recalculate totals.
@@ -359,7 +365,20 @@ function EditPurchaseContent() {
                 Customer & Bill Details
               </h2>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Bill / Invoice No
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. BILL-1042"
+                    value={billNumber}
+                    onChange={(e) => setBillNumber(e.target.value)}
+                    className="w-full px-3 py-2 text-sm font-mono font-bold rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+                  />
+                </div>
+
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
                     Customer Name *
@@ -632,6 +651,7 @@ function EditPurchaseContent() {
 
             <PurchaseSummaryCard
               pharmacyName={pharmacyName}
+              billNumber={billNumber}
               customerName={customerName || 'Customer'}
               whatsappNumber={whatsappNumber ? normalizeWhatsAppNumber(whatsappNumber) : ''}
               purchaseDate={purchaseDate ? new Date(purchaseDate) : new Date()}

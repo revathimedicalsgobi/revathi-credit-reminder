@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { normalizeWhatsAppNumber } from '@/lib/validations';
-import { computePurchasePaymentDetails } from '@/lib/payment-helpers';
+import { computePurchasePaymentDetails, getOrGenerateBillNumber } from '@/lib/payment-helpers';
 import { roundToTwoDecimals } from '@/lib/calculations';
 
 export const dynamic = 'force-dynamic';
@@ -71,6 +71,7 @@ export async function GET(
 
       return {
         ...p,
+        bill_number: getOrGenerateBillNumber(p, p.audit_logs || []),
         paid_amount: details.paid_amount,
         balance_due: details.balance_due,
         payment_status: details.payment_status,

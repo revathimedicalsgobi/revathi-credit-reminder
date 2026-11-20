@@ -41,6 +41,7 @@ export const PurchaseItemSchema = z.object({
 });
 
 export const CreatePurchaseSchema = z.object({
+  bill_number: z.string().trim().max(100).optional().nullable(),
   customer_name: z.string().min(1, 'Customer name is required').trim(),
   whatsapp_number: z.string().refine(isValidWhatsAppNumber, {
     message: 'Please provide a valid 10-digit WhatsApp number (e.g. 9876543210 or +919876543210)',
@@ -50,6 +51,7 @@ export const CreatePurchaseSchema = z.object({
 });
 
 export const UpdatePurchaseSchema = z.object({
+  bill_number: z.string().trim().max(100).optional().nullable(),
   customer_name: z.string().min(1, 'Customer name is required').trim(),
   whatsapp_number: z.string().refine(isValidWhatsAppNumber, {
     message: 'Please provide a valid 10-digit WhatsApp number (e.g. 9876543210 or +919876543210)',

@@ -109,7 +109,7 @@ export async function PUT(
       );
     }
 
-    const { customer_name, whatsapp_number, purchase_date, items, send_whatsapp } = validationResult.data;
+    const { customer_name, whatsapp_number, purchase_date, items, send_whatsapp, bill_number: inputBillNumber } = validationResult.data;
     const normalizedPhone = normalizeWhatsAppNumber(whatsapp_number);
 
     // 2. Fetch existing purchase and its audit logs
@@ -180,13 +180,58 @@ export async function PUT(
       updateFields.purchase_date = new Date(purchase_date).toISOString();
     }
 
-    // Try updating purchases table
-    const { data: updatedPurchase, error: purchaseUpdateErr } = await supabase
-      .from('purchases')
-      .update(updateFields)
-      .eq('id', purchaseId)
-      .select()
-      .single();
+    // Try updating purchases table with bill_number if provided
+    let updatedPurchase: any = null;
+    let purchaseUpdateErr: any = null;
+
+    if (inputBillNumber && inputBillNumber.trim()) {
+      const tryWithBillNo = await supabase
+        .from('purchases')
+        .update({
+          ...updateFields,
+          bill_number: inputBillNumber.trim(),
+        })
+        .eq('id', purchaseId)
+        .select()
+        .single();
+
+      if (!tryWithBillNo.error) {
+        updatedPurchase = tryWithBillNo.data;
+      } else {
+        // Fallback without bill_number column in case not yet in DB schema
+        const tryWithout = await supabase
+          .from('purchases')
+          .update(updateFields)
+          .eq('id', purchaseId)
+          .select()
+          .single();
+
+        if (tryWithout.error) {
+          purchaseUpdateErr = tryWithout.error;
+        } else {
+          updatedPurchase = tryWithout.data;
+          await supabase.from('audit_logs').insert({
+            purchase_id: purchaseId,
+            previous_status: existingPurchase.payment_status,
+            new_status: 'BILL_NUMBER',
+            notes: JSON.stringify({ bill_number: inputBillNumber.trim() }),
+          });
+        }
+      }
+    } else {
+      const res = await supabase
+        .from('purchases')
+        .update(updateFields)
+        .eq('id', purchaseId)
+        .select()
+        .single();
+
+      if (res.error) {
+        purchaseUpdateErr = res.error;
+      } else {
+        updatedPurchase = res.data;
+      }
+    }
 
     if (purchaseUpdateErr) {
       return NextResponse.json({ error: `Failed to update purchase: ${purchaseUpdateErr.message}` }, { status: 500 });

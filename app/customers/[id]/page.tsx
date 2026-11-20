@@ -23,10 +23,11 @@ import {
   User,
 } from 'lucide-react';
 import { formatINR } from '@/lib/calculations';
-import { PaymentMode } from '@/lib/types';
+import { PaymentMode, ReceiptDetails } from '@/lib/types';
 import { getPendingAgeText, getPendingDaysCount, formatDisplayDate, formatShortDate, maskWhatsAppNumber } from '@/lib/utils';
 import { PaymentStatusBadge } from '@/components/StatusBadge';
 import { PaymentReceivedModal } from '@/components/PaymentReceivedModal';
+import { ReceiptModal } from '@/components/ReceiptModal';
 import {
   buildWhatsAppReminderText,
   buildWhatsAppCustomerStatementText,
@@ -44,6 +45,7 @@ interface CustomerStatementData {
   };
   purchases: Array<{
     id: string;
+    bill_number?: string | null;
     purchase_date: string;
     gross_total: number;
     total_discount: number;
@@ -100,12 +102,14 @@ export default function CustomerStatementDetailPage() {
   // Payment Received Modal
   const [activePaymentModal, setActivePaymentModal] = useState<{
     purchaseId: string;
+    billNumber?: string;
     amount: number;
     paidAmount?: number;
     balanceDue?: number;
   } | null>(null);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [paymentModalError, setPaymentModalError] = useState<string | null>(null);
+  const [activeReceipt, setActiveReceipt] = useState<ReceiptDetails | null>(null);
 
   const fetchCustomerStatement = useCallback(async () => {
     try {
@@ -379,6 +383,32 @@ export default function CustomerStatementDetailPage() {
 
   const hasOutstanding = statement.summary.outstanding_balance > 0;
 
+  const handleExportCSV = () => {
+    if (!statement) return;
+    const rows = [
+      ['Date', 'Bill No', 'Items', 'Gross Total (INR)', 'Discount (INR)', 'Net Amount (INR)', 'Paid Amount (INR)', 'Pending Due (INR)', 'Payment Status'],
+      ...statement.purchases.map((p) => [
+        formatShortDate(p.purchase_date),
+        p.bill_number || `BILL-${p.id.slice(0, 4).toUpperCase()}`,
+        (p.items || []).map((i) => `${i.item_name} (x${i.quantity})`).join('; '),
+        p.gross_total,
+        p.total_discount,
+        p.amount_payable,
+        p.paid_amount || 0,
+        p.balance_due || 0,
+        p.payment_status,
+      ]),
+    ];
+    const csvContent = 'data:text/csv;charset=utf-8,' + rows.map((e) => e.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `Statement_${statement.customer.name.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
       {/* Top Header & Breadcrumb */}
@@ -420,6 +450,15 @@ export default function CustomerStatementDetailPage() {
 
         {/* Action Buttons */}
         <div className="flex items-center flex-wrap gap-2.5">
+          <button
+            onClick={handleExportCSV}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl shadow-sm transition-all cursor-pointer"
+            title="Download Statement as CSV Spreadsheet"
+          >
+            <FileText className="w-3.5 h-3.5 text-slate-600" />
+            <span>Export CSV</span>
+          </button>
+
           <button
             onClick={() => window.print()}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl shadow-sm transition-all"
@@ -532,7 +571,7 @@ export default function CustomerStatementDetailPage() {
               <span>Transaction Statement Ledger</span>
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Itemized history of all purchases, discounts, and payments.
+              Itemized history of all sales, discounts, and payments.
             </p>
           </div>
 
@@ -583,6 +622,7 @@ export default function CustomerStatementDetailPage() {
                 <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500 font-bold border-b border-slate-200">
                   <tr>
                     <th className="py-3.5 px-6">Bill Date</th>
+                    <th className="py-3.5 px-4">Bill No</th>
                     <th className="py-3.5 px-4">Items Summary</th>
                     <th className="py-3.5 px-4">Gross Total</th>
                     <th className="py-3.5 px-4">Discount</th>
@@ -603,6 +643,11 @@ export default function CustomerStatementDetailPage() {
                       <tr key={purchase.id} className="hover:bg-slate-50/80 transition-colors">
                         <td className="py-4 px-6 text-xs text-slate-900 font-semibold whitespace-nowrap">
                           {formatDisplayDate(purchase.purchase_date)}
+                        </td>
+                        <td className="py-4 px-4 font-mono font-bold text-xs text-slate-800 whitespace-nowrap">
+                          <span className="bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                            {purchase.bill_number || `BILL-${purchase.id.slice(0, 4).toUpperCase()}`}
+                          </span>
                         </td>
                         <td className="py-4 px-4 text-xs text-slate-700 max-w-xs">
                           {purchase.items && purchase.items.length > 0 ? (
@@ -681,6 +726,7 @@ export default function CustomerStatementDetailPage() {
                                   onClick={() =>
                                     setActivePaymentModal({
                                       purchaseId: purchase.id,
+                                      billNumber: purchase.bill_number || `BILL-${purchase.id.slice(0, 4).toUpperCase()}`,
                                       amount: Number(purchase.amount_payable),
                                       paidAmount: Number(purchase.paid_amount || 0),
                                       balanceDue: purchase.balance_due,
@@ -693,14 +739,41 @@ export default function CustomerStatementDetailPage() {
                                 </button>
                               </>
                             ) : (
-                              <button
-                                onClick={() => handleSendThankYou(purchase)}
-                                className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold"
-                                title="Send Thank-You on WhatsApp"
-                              >
-                                <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
-                                <span>Thank-You</span>
-                              </button>
+                              <>
+                                <button
+                                  onClick={() => {
+                                    setActiveReceipt({
+                                      receipt_number: `RCP-${purchase.id.slice(0, 4).toUpperCase()}`,
+                                      receipt_date: purchase.payment_received_at || purchase.purchase_date,
+                                      purchase_id: purchase.id,
+                                      bill_number: purchase.bill_number || `BILL-${purchase.id.slice(0, 4).toUpperCase()}`,
+                                      customer_name: statement.customer.name,
+                                      whatsapp_number: statement.customer.whatsapp_number,
+                                      payment_mode: 'CASH',
+                                      amount_received: Number(purchase.paid_amount || purchase.amount_payable),
+                                      total_bill_amount: Number(purchase.amount_payable),
+                                      previous_paid: 0,
+                                      new_total_paid: Number(purchase.paid_amount || purchase.amount_payable),
+                                      remaining_balance: Number(purchase.balance_due || 0),
+                                      pharmacy_name: pharmacyName,
+                                    });
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-800 border border-slate-200 rounded-lg text-xs font-semibold"
+                                  title="View Official Payment Receipt Slip"
+                                >
+                                  <Receipt className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span>Receipt</span>
+                                </button>
+
+                                <button
+                                  onClick={() => handleSendThankYou(purchase)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold"
+                                  title="Send Thank-You on WhatsApp"
+                                >
+                                  <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span>Thank-You</span>
+                                </button>
+                              </>
                             )}
                           </div>
                         </td>
@@ -900,6 +973,7 @@ export default function CustomerStatementDetailPage() {
           onConfirm={handleConfirmPaymentReceived}
           customerName={statement.customer.name}
           whatsappNumber={statement.customer.whatsapp_number}
+          billNumber={activePaymentModal.billNumber}
           amountPayable={activePaymentModal.amount}
           paidAmount={activePaymentModal.paidAmount || 0}
           balanceDue={activePaymentModal.balanceDue}
@@ -908,6 +982,18 @@ export default function CustomerStatementDetailPage() {
           pharmacyName={pharmacyName}
           isProcessing={isProcessingPayment}
           errorMessage={paymentModalError}
+          onShowReceipt={(rcp) => setActiveReceipt(rcp)}
+        />
+      )}
+
+      {/* Official Payment Receipt Slip Modal */}
+      {activeReceipt && (
+        <ReceiptModal
+          isOpen={Boolean(activeReceipt)}
+          onClose={() => setActiveReceipt(null)}
+          receipt={activeReceipt}
+          pharmacyName={pharmacyName}
+          upiId={upiId}
         />
       )}
 

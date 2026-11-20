@@ -43,6 +43,64 @@ export function formatCustomerSalutation(name: string): string {
   return `Mr/Mrs. ${trimmed}`;
 }
 
+export interface WhatsAppReceiptShareData {
+  receiptNumber: string;
+  receiptDate: string | Date;
+  billNumber?: string;
+  customerName: string;
+  recipientPhone: string;
+  amountReceived: number;
+  totalBillAmount: number;
+  previousPaid?: number;
+  remainingBalance: number;
+  paymentMode: string;
+  pharmacyName?: string;
+  upiId?: string | null;
+  notes?: string | null;
+}
+
+/**
+ * Builds formal official payment receipt text for WhatsApp
+ */
+export function buildWhatsAppPaymentReceiptText(data: WhatsAppReceiptShareData): string {
+  const pharmacy = data.pharmacyName || 'Revathi Medicals & Distributors';
+  const customerGreeting = formatCustomerSalutation(data.customerName);
+  const amountStr = formatINR(data.amountReceived);
+  const remainingStr = formatINR(data.remainingBalance);
+  const totalBillStr = formatINR(data.totalBillAmount);
+  const dateStr = formatShortDate(data.receiptDate);
+  const billLine = data.billNumber ? `\n• 🧾 *Bill / Invoice No:* *${data.billNumber}*` : '';
+  const notesLine = data.notes ? `\n• 📝 *Notes:* ${data.notes}` : '';
+  const upiLine = data.upiId ? `\n💳 *UPI ID:* \`${data.upiId}\`` : '';
+
+  const settlementStatus = data.remainingBalance <= 0
+    ? '✨ *BILL STATUS: FULLY SETTLED (PAID)*'
+    : `⏳ *REMAINING BALANCE DUE: ${remainingStr}*`;
+
+  return `━━━━━━━━━━━━━━━━━━━━━━━
+🏥 *${pharmacy.toUpperCase()}*
+🧾 *OFFICIAL PAYMENT RECEIPT*
+━━━━━━━━━━━━━━━━━━━━━━━
+
+Hello *${customerGreeting}*,
+
+This is your official payment acknowledgement receipt:
+
+📄 *Receipt No:* *${data.receiptNumber}*
+📅 *Payment Date:* ${dateStr}${billLine}
+💵 *Amount Received:* *${amountStr}*
+💳 *Payment Mode:* *${data.paymentMode || 'CASH'}*${notesLine}
+
+───────────────────────
+📊 *Bill Account Summary:*
+• *Total Bill Amount:* ${totalBillStr}
+• 💵 *Amount Paid Now:* *${amountStr}*
+• ${settlementStatus}
+───────────────────────${upiLine}
+
+Thank you for your payment and for choosing *${pharmacy}*! 🙏`;
+}
+
 /**
  * Clean and format recipient phone for wa.me / WhatsApp Web
  */
@@ -111,7 +169,7 @@ ${itemsList}
 
 📌 *Previous Unpaid Credit (Date-Wise):*
 ${dateWiseList ? dateWiseList + '\n' : ''}• *Previous Outstanding:* ${formatINR(previousBal)}
-• *Today's New Purchase:* ${billAmountStr}
+• *Today's New Sale Bill:* ${billAmountStr}
 
 ━━━━━━━━━━━━━━━━━━━━━━━
 🔴 *TOTAL CUMULATIVE BALANCE DUE:* *${formatINR(cumulativeTotal)}*
@@ -123,16 +181,16 @@ Thank you for choosing *${pharmacy}*! 🙏`;
 
   return `━━━━━━━━━━━━━━━━━━━━━━━
 🏥 *${pharmacy.toUpperCase()}*
-📄 *PURCHASE SUMMARY BILL*
+📄 *SALE BILL SUMMARY*
 ━━━━━━━━━━━━━━━━━━━━━━━
 
 Hello *${customerGreeting}*,
 
-Thank you for your purchase from *${pharmacy}*.
+Thank you for your visit to *${pharmacy}*.
 
 📅 *Date:* ${dateStr}
 
-🛒 *Items Purchased:*
+🛒 *Bill Items:*
 ${itemsList}
 
 ───────────────────────
@@ -178,7 +236,7 @@ export function buildWhatsAppReminderText(data: WhatsAppReminderData): string {
 
 Hello *${customerGreeting}*,
 
-This is a gentle payment reminder from *${pharmacy}* regarding your purchase on *${dateStr}* (Pending: ${daysText}).
+This is a gentle payment reminder from *${pharmacy}* regarding your bill on *${dateStr}* (Pending: ${daysText}).
 
 ───────────────────────
 ${breakdownText}

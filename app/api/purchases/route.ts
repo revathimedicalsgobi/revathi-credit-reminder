@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { CreatePurchaseSchema, normalizeWhatsAppNumber } from '@/lib/validations';
 import { calculatePurchaseSummary } from '@/lib/calculations';
-import { computePurchasePaymentDetails } from '@/lib/payment-helpers';
+import { computePurchasePaymentDetails, enrichPurchaseWithPayments, generateNewBillNumber } from '@/lib/payment-helpers';
 import { getWhatsAppProvider } from '@/lib/whatsapp';
 
 export const dynamic = 'force-dynamic';
@@ -39,16 +39,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Enrich with computed partial payments
+    // Enrich with computed partial payments and bill number
     const enrichedPurchases = (purchases || []).map((p) => {
-      const { paid_amount, balance_due, payment_status, payments } = computePurchasePaymentDetails(p, p.audit_logs || []);
-      return {
-        ...p,
-        paid_amount,
-        balance_due,
-        payment_status,
-        payments,
-      };
+      return enrichPurchaseWithPayments(p as any, p.audit_logs || []);
     });
 
     let filtered = enrichedPurchases;
@@ -68,10 +61,12 @@ export async function GET(request: NextRequest) {
       filtered = filtered.filter((p) => {
         const custName = p.customer?.name?.toLowerCase() || '';
         const custPhone = p.customer?.whatsapp_number || '';
+        const billNo = (p.bill_number || '').toLowerCase();
         const id = p.id || '';
         return (
           custName.includes(searchLower) ||
           custPhone.includes(search) ||
+          billNo.includes(searchLower) ||
           id.includes(search)
         );
       });
@@ -100,8 +95,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { customer_name, whatsapp_number, items, send_whatsapp } = validationResult.data;
+    const { customer_name, whatsapp_number, items, send_whatsapp, bill_number: inputBillNumber } = validationResult.data;
     const normalizedPhone = normalizeWhatsAppNumber(whatsapp_number);
+    const effectiveBillNumber = (inputBillNumber && inputBillNumber.trim()) || generateNewBillNumber();
 
     const calculated = calculatePurchaseSummary(items);
     if (calculated.items.length === 0) {
@@ -137,21 +133,54 @@ export async function POST(request: NextRequest) {
         .eq('id', customerId);
     }
 
-    const { data: purchase, error: purchaseErr } = await supabase
+    // Try creating purchase with bill_number first; fallback gracefully if column not yet migrated
+    let purchase: any = null;
+    let purchaseErr: any = null;
+
+    const basePayload = {
+      customer_id: customerId,
+      gross_total: calculated.gross_total,
+      total_discount: calculated.total_discount,
+      amount_payable: calculated.amount_payable,
+      payment_status: 'PENDING',
+      whatsapp_status: 'PENDING',
+    };
+
+    const tryWithBillNo = await supabase
       .from('purchases')
       .insert({
-        customer_id: customerId,
-        gross_total: calculated.gross_total,
-        total_discount: calculated.total_discount,
-        amount_payable: calculated.amount_payable,
-        payment_status: 'PENDING',
-        whatsapp_status: 'PENDING',
+        ...basePayload,
+        bill_number: effectiveBillNumber,
       })
       .select()
       .single();
 
-    if (purchaseErr) {
-      return NextResponse.json({ error: `Purchase record creation failed: ${purchaseErr.message}` }, { status: 500 });
+    if (!tryWithBillNo.error) {
+      purchase = tryWithBillNo.data;
+    } else {
+      // Fallback: column purchases.bill_number might not exist on remote DB yet
+      const tryWithoutBillNo = await supabase
+        .from('purchases')
+        .insert(basePayload)
+        .select()
+        .single();
+
+      if (tryWithoutBillNo.error) {
+        purchaseErr = tryWithoutBillNo.error;
+      } else {
+        purchase = tryWithoutBillNo.data;
+        // Persist bill_number in audit_logs so it survives and loads permanently
+        await supabase.from('audit_logs').insert({
+          purchase_id: purchase.id,
+          previous_status: 'PENDING',
+          new_status: 'BILL_NUMBER',
+          notes: JSON.stringify({ bill_number: effectiveBillNumber }),
+        });
+      }
+    }
+
+    if (purchaseErr || !purchase) {
+      return NextResponse.json({ error: `Purchase record creation failed: ${purchaseErr?.message || 'Unknown error'}` }, { status: 500 });
     }
 
     const itemsToInsert = calculated.items.map((item) => ({

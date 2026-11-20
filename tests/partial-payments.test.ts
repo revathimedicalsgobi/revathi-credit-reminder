@@ -1,10 +1,18 @@
 import { describe, it, expect } from 'vitest';
-import { computePurchasePaymentDetails, parsePaymentRecord } from '../lib/payment-helpers';
-import { UpdatePurchaseSchema, RecordPaymentSchema } from '../lib/validations';
+import {
+  computePurchasePaymentDetails,
+  parsePaymentRecord,
+  generateNewBillNumber,
+  generateReceiptNumber,
+  getOrGenerateBillNumber,
+  enrichPurchaseWithPayments,
+} from '../lib/payment-helpers';
+import { UpdatePurchaseSchema, RecordPaymentSchema, CreatePurchaseSchema } from '../lib/validations';
 import {
   buildWhatsAppReminderText,
   buildWhatsAppThankYouText,
   buildWhatsAppSummaryText,
+  buildWhatsAppPaymentReceiptText,
 } from '../lib/whatsapp-share';
 import { AuditLog } from '../lib/types';
 
@@ -218,6 +226,58 @@ describe('Partial Payments & Bill Edit Tests', () => {
     expect(arrivalMsg).toContain('2 Strips');
     expect(arrivalMsg).toContain('Urgent refill');
     expect(arrivalMsg).toContain('IN STOCK');
+  });
+
+  it('correctly generates, validates, and resolves Bill Numbers and Receipt Numbers', () => {
+    // 1. Bill number generation
+    const billNo = generateNewBillNumber('BILL');
+    expect(billNo).toMatch(/^BILL-\d{4}-\d{4}$/);
+
+    // 2. Custom bill number in CreatePurchaseSchema
+    const createdWithBill = CreatePurchaseSchema.safeParse({
+      bill_number: 'INV-2026-99',
+      customer_name: 'Anitha',
+      whatsapp_number: '9876543210',
+      items: [{ item_name: 'Dolo 650', quantity: 1, mrp: 30, discount: 0 }],
+    });
+    expect(createdWithBill.success).toBe(true);
+    if (createdWithBill.success) {
+      expect(createdWithBill.data.bill_number).toBe('INV-2026-99');
+    }
+
+    // 3. Fallback deterministic bill number resolution
+    const purchaseWithoutBill = {
+      id: 'a1b2c3d4-e5f6-7890',
+      purchase_date: '2026-11-20T10:00:00Z',
+    };
+    const resolved = getOrGenerateBillNumber(purchaseWithoutBill as any);
+    expect(resolved).toContain('BILL-');
+    expect(resolved).toContain('A1B2');
+
+    // 4. Receipt number generation
+    const rcpNo = generateReceiptNumber('purch-123');
+    expect(rcpNo).toContain('RCP-');
+    expect(rcpNo).toContain('PURC');
+
+    // 5. Formal WhatsApp payment receipt message formatting
+    const rcpMsg = buildWhatsAppPaymentReceiptText({
+      receiptNumber: 'RCP-2611-1042',
+      receiptDate: '2026-11-20T12:00:00Z',
+      billNumber: 'BILL-1042',
+      customerName: 'Karthik',
+      recipientPhone: '+919876543210',
+      amountReceived: 500,
+      totalBillAmount: 800,
+      remainingBalance: 300,
+      paymentMode: 'UPI',
+      pharmacyName: 'Revathi Medicals',
+    });
+
+    expect(rcpMsg).toContain('OFFICIAL PAYMENT RECEIPT');
+    expect(rcpMsg).toContain('RCP-2611-1042');
+    expect(rcpMsg).toContain('BILL-1042');
+    expect(rcpMsg).toContain('500.00');
+    expect(rcpMsg).toContain('300.00');
   });
 
 });

@@ -2,6 +2,75 @@ import { Purchase, PaymentRecord, PaymentStatus, AuditLog } from './types';
 import { roundToTwoDecimals } from './calculations';
 
 /**
+ * Generates a clean default Bill Number for a new or existing purchase
+ */
+export function generateNewBillNumber(customPrefix = 'BILL'): string {
+  const now = new Date();
+  const year = now.getFullYear().toString().slice(2);
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+  return `${customPrefix}-${year}${month}-${randomSuffix}`;
+}
+
+/**
+ * Generates a formal Receipt Number for a payment entry
+ */
+export function generateReceiptNumber(purchaseId?: string): string {
+  const now = new Date();
+  const year = now.getFullYear().toString().slice(2);
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const idPart = purchaseId ? purchaseId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() : Math.random().toString(36).slice(2, 6).toUpperCase();
+  const seq = Math.floor(100 + Math.random() * 900);
+  return `RCP-${year}${month}-${idPart}-${seq}`;
+}
+
+/**
+ * Resolves or deterministically derives a Bill Number for any purchase
+ */
+export function getOrGenerateBillNumber(
+  purchase: {
+    id: string;
+    bill_number?: string | null;
+    purchase_date?: string;
+    created_at?: string;
+  },
+  auditLogs?: AuditLog[]
+): string {
+  if (purchase.bill_number && purchase.bill_number.trim()) {
+    return purchase.bill_number.trim();
+  }
+
+  // Check audit logs for bill number override
+  if (auditLogs && auditLogs.length > 0) {
+    for (const log of auditLogs) {
+      if (log.purchase_id === purchase.id) {
+        if (log.new_status === 'BILL_NUMBER' && log.notes) {
+          const trimmed = log.notes.replace(/^BILL_NUMBER:\s*/i, '').trim();
+          if (trimmed) return trimmed;
+        }
+        if (log.notes && log.notes.trim().startsWith('{')) {
+          try {
+            const parsed = JSON.parse(log.notes);
+            if (parsed.bill_number && String(parsed.bill_number).trim()) {
+              return String(parsed.bill_number).trim();
+            }
+          } catch {
+            // ignore
+          }
+        }
+      }
+    }
+  }
+
+  // Deterministic fallback based on purchase date and ID
+  const d = purchase.purchase_date || purchase.created_at || new Date().toISOString();
+  const year = d.slice(2, 4);
+  const month = d.slice(5, 7);
+  const cleanId = (purchase.id || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || '0001';
+  return `BILL-${year}${month}-${cleanId}`;
+}
+
+/**
  * Extracts and parses structured payment data from an audit log record
  */
 export function parsePaymentRecord(log: AuditLog): PaymentRecord | null {
@@ -12,13 +81,20 @@ export function parsePaymentRecord(log: AuditLog): PaymentRecord | null {
     try {
       const parsed = JSON.parse(log.notes);
       if (parsed.type === 'PAYMENT' || parsed.amount !== undefined) {
+        const paidAt = parsed.paid_at || log.changed_at;
+        const year = paidAt.slice(2, 4);
+        const month = paidAt.slice(5, 7);
+        const logIdSuffix = log.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase();
+        const fallbackReceiptNo = `RCP-${year}${month}-${logIdSuffix}`;
+
         return {
           id: log.id,
           purchase_id: log.purchase_id,
           amount: Math.max(0, Number(parsed.amount) || 0),
           payment_mode: parsed.payment_mode || 'CASH',
+          receipt_number: parsed.receipt_number || fallbackReceiptNo,
           notes: parsed.notes || null,
-          paid_at: parsed.paid_at || log.changed_at,
+          paid_at: paidAt,
           created_at: log.changed_at,
         };
       }
@@ -29,13 +105,19 @@ export function parsePaymentRecord(log: AuditLog): PaymentRecord | null {
 
   // Legacy or status-based payment log
   if (log.new_status === 'PAID' || log.new_status === 'PARTIAL_PAYMENT') {
+    const paidAt = log.changed_at;
+    const year = paidAt.slice(2, 4);
+    const month = paidAt.slice(5, 7);
+    const logIdSuffix = log.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase();
+
     return {
       id: log.id,
       purchase_id: log.purchase_id,
-      amount: 0, // Will be inferred or matched against purchase if standalone
+      amount: 0, // Will be matched against purchase if standalone
       payment_mode: 'CASH',
+      receipt_number: `RCP-${year}${month}-${logIdSuffix}`,
       notes: log.notes || 'Full payment received',
-      paid_at: log.changed_at,
+      paid_at: paidAt,
       created_at: log.changed_at,
     };
   }
@@ -102,6 +184,7 @@ export function computePurchasePaymentDetails(
         purchase_id: purchase.id,
         amount: amountPayable,
         payment_mode: 'CASH',
+        receipt_number: `RCP-LEGACY-${purchase.id.slice(0, 4).toUpperCase()}`,
         notes: 'Full payment received',
         paid_at: purchase.payment_received_at || new Date().toISOString(),
       });
@@ -133,7 +216,7 @@ export function computePurchasePaymentDetails(
 }
 
 /**
- * Enriches a single purchase object with computed partial payment details
+ * Enriches a single purchase object with computed partial payment details and Bill Number
  */
 export function enrichPurchaseWithPayments(
   purchase: Purchase & { audit_logs?: AuditLog[] },
@@ -141,9 +224,11 @@ export function enrichPurchaseWithPayments(
 ): Purchase {
   const logs = auditLogs || purchase.audit_logs || [];
   const details = computePurchasePaymentDetails(purchase, logs);
+  const resolvedBillNumber = getOrGenerateBillNumber(purchase, logs);
 
   return {
     ...purchase,
+    bill_number: resolvedBillNumber,
     paid_amount: details.paid_amount,
     balance_due: details.balance_due,
     payment_status: details.payment_status,

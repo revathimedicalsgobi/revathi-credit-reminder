@@ -45,7 +45,7 @@ export function ProcessPurchaseModal({
         <div className="flex items-center justify-between pb-3 border-b border-slate-100">
           <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
             <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-            Process Credit Purchase
+            Process Credit Sale
           </h3>
           <button
             onClick={onClose}
@@ -67,7 +67,7 @@ export function ProcessPurchaseModal({
               <span className="font-medium text-slate-700 font-mono">{whatsappNumber}</span>
             </div>
             <div className="flex justify-between items-center text-sm pt-2 border-t border-slate-200">
-              <span className="font-medium text-slate-700">This Purchase Amount:</span>
+              <span className="font-medium text-slate-700">This Sale Amount:</span>
               <span className="text-base font-bold text-slate-900">
                 {formatINR(amountPayable)}
               </span>
@@ -95,8 +95,8 @@ export function ProcessPurchaseModal({
               {sendWhatsApp
                 ? (previousBalance > 0
                     ? `Credit bill & cumulative date-wise statement will be saved and sent to ${whatsappNumber}.`
-                    : `Purchase summary will be saved and sent to ${whatsappNumber} via official WhatsApp API.`)
-                : 'Purchase will be saved as Pending without sending a WhatsApp message.'}
+                    : `Sale summary will be saved and sent to ${whatsappNumber} via official WhatsApp API.`)
+                : 'Sale will be saved as Pending without sending a WhatsApp message.'}
             </p>
           </div>
 

@@ -17,12 +17,14 @@ import {
   ArrowUpDown,
   MessageCircle,
   Edit2,
+  Receipt,
 } from 'lucide-react';
-import { Purchase, DashboardStats, PaymentMode } from '@/lib/types';
+import { Purchase, DashboardStats, PaymentMode, ReceiptDetails } from '@/lib/types';
 import { formatINR } from '@/lib/calculations';
 import { getPendingAgeText, getPendingDaysCount, formatShortDate, maskWhatsAppNumber } from '@/lib/utils';
 import { PaymentStatusBadge } from '@/components/StatusBadge';
 import { PaymentReceivedModal } from '@/components/PaymentReceivedModal';
+import { ReceiptModal } from '@/components/ReceiptModal';
 import { buildWhatsAppReminderText, buildWhatsAppThankYouText, getWhatsAppDirectUrl } from '@/lib/whatsapp-share';
 
 export default function DashboardPage() {
@@ -44,6 +46,7 @@ export default function DashboardPage() {
 
   const [activePaymentModal, setActivePaymentModal] = useState<{
     purchaseId: string;
+    billNumber?: string;
     customerName: string;
     whatsappNumber: string;
     amount: number;
@@ -53,6 +56,7 @@ export default function DashboardPage() {
     otherPendingBillsCount?: number;
   } | null>(null);
 
+  const [activeReceipt, setActiveReceipt] = useState<ReceiptDetails | null>(null);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [paymentModalError, setPaymentModalError] = useState<string | null>(null);
 
@@ -233,6 +237,7 @@ export default function DashboardPage() {
 
     setActivePaymentModal({
       purchaseId: purchase.id,
+      billNumber: purchase.bill_number || `BILL-${purchase.id.slice(0, 4).toUpperCase()}`,
       customerName: purchase.customer?.name || 'Customer',
       whatsappNumber: purchase.customer?.whatsapp_number || '',
       amount: Number(purchase.amount_payable),
@@ -308,7 +313,7 @@ export default function DashboardPage() {
             Dashboard
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-            Monitor customer purchases, pending & partial payments, and automated WhatsApp follow-ups.
+            Monitor customer credit sales, pending & partial payments, and automated WhatsApp follow-ups.
           </p>
         </div>
 
@@ -327,7 +332,7 @@ export default function DashboardPage() {
             className="inline-flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-xl shadow-md shadow-emerald-600/30 transition-all transform hover:-translate-y-0.5"
           >
             <PlusCircle className="w-4 h-4" />
-            <span>New Purchase</span>
+            <span>New Sale</span>
           </Link>
         </div>
       </div>
@@ -337,7 +342,7 @@ export default function DashboardPage() {
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden group hover:border-emerald-300 transition-colors">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-              Today&apos;s Purchases
+              Today&apos;s Sales
             </span>
             <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
               <ShoppingBag className="w-4 h-4" />
@@ -438,7 +443,7 @@ export default function DashboardPage() {
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              All Purchases
+              All Sales
             </button>
           </div>
 
@@ -468,20 +473,20 @@ export default function DashboardPage() {
         {loading ? (
           <div className="py-16 text-center text-slate-400 text-sm flex flex-col items-center justify-center gap-2">
             <div className="w-8 h-8 border-3 border-emerald-500/20 border-t-emerald-600 rounded-full animate-spin" />
-            <span>Loading purchases...</span>
+            <span>Loading sales...</span>
           </div>
         ) : sortedPurchases.length === 0 ? (
           <div className="py-16 text-center px-4">
             <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
               <ShoppingBag className="w-6 h-6" />
             </div>
-            <h3 className="text-sm font-bold text-slate-800">No purchases found</h3>
+            <h3 className="text-sm font-bold text-slate-800">No sales found</h3>
             <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
               {searchTerm
                 ? 'No matching customer records for your search query.'
                 : statusFilter === 'PENDING'
                 ? 'Great news! There are no pending payments at the moment.'
-                : 'No purchase records recorded yet.'}
+                : 'No sales recorded yet.'}
             </p>
             <div className="mt-4">
               <Link
@@ -489,7 +494,7 @@ export default function DashboardPage() {
                 className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 shadow-sm"
               >
                 <PlusCircle className="w-3.5 h-3.5" />
-                <span>Create New Purchase</span>
+                <span>Create New Sale</span>
               </Link>
             </div>
           </div>
@@ -500,8 +505,9 @@ export default function DashboardPage() {
                 <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500 font-bold border-b border-slate-200">
                   <tr>
                     <th className="py-3.5 px-6">Customer</th>
+                    <th className="py-3.5 px-4">Bill No</th>
                     <th className="py-3.5 px-4">WhatsApp</th>
-                    <th className="py-3.5 px-4">Purchase Date</th>
+                    <th className="py-3.5 px-4">Sale Date</th>
                     <th className="py-3.5 px-4">Bill Amount</th>
                     <th className="py-3.5 px-4">Pending Due</th>
                     <th className="py-3.5 px-4">Status</th>
@@ -532,6 +538,11 @@ export default function DashboardPage() {
                           ) : (
                             <span>{purchase.customer?.name || 'Customer'}</span>
                           )}
+                        </td>
+                        <td className="py-4 px-4 font-mono font-bold text-xs text-slate-800 whitespace-nowrap">
+                          <span className="bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                            {purchase.bill_number || `BILL-${purchase.id.slice(0, 4).toUpperCase()}`}
+                          </span>
                         </td>
                         <td className="py-4 px-4 text-xs font-mono text-slate-600">
                           {maskWhatsAppNumber(purchase.customer?.whatsapp_number || '')}
@@ -570,7 +581,7 @@ export default function DashboardPage() {
                             <Link
                               href={`/purchases/${purchase.id}`}
                               className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition-colors"
-                              title="View Purchase Summary"
+                              title="View Sale Bill Summary"
                             >
                               <Eye className="w-3.5 h-3.5" />
                               <span>View</span>
@@ -610,19 +621,47 @@ export default function DashboardPage() {
                                 </button>
                               </>
                             ) : (
-                              <button
-                                onClick={() => handleSendManualThankYou(purchase)}
-                                disabled={sendingMap[purchase.id]}
-                                className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold transition-all disabled:opacity-50"
-                                title="Send WhatsApp Thank-You receipt automatically"
-                              >
-                                {sendingMap[purchase.id] ? (
-                                  <div className="w-3.5 h-3.5 border-2 border-emerald-600/30 border-t-emerald-600 rounded-full animate-spin" />
-                                ) : (
-                                  <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
-                                )}
-                                <span>{sendingMap[purchase.id] ? 'Sending...' : 'Thank-You'}</span>
-                              </button>
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveReceipt({
+                                      receipt_number: `RCP-${purchase.id.slice(0, 4).toUpperCase()}`,
+                                      receipt_date: purchase.payment_received_at || purchase.purchase_date,
+                                      purchase_id: purchase.id,
+                                      bill_number: purchase.bill_number || `BILL-${purchase.id.slice(0, 4).toUpperCase()}`,
+                                      customer_name: purchase.customer?.name || 'Customer',
+                                      whatsapp_number: purchase.customer?.whatsapp_number || '',
+                                      payment_mode: 'CASH',
+                                      amount_received: Number(purchase.paid_amount || purchase.amount_payable),
+                                      total_bill_amount: Number(purchase.amount_payable),
+                                      previous_paid: 0,
+                                      new_total_paid: Number(purchase.paid_amount || purchase.amount_payable),
+                                      remaining_balance: Number(purchase.balance_due || 0),
+                                      pharmacy_name: pharmacyName,
+                                    });
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                                  title="View Printable Payment Receipt Slip"
+                                >
+                                  <Receipt className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span>Receipt</span>
+                                </button>
+
+                                <button
+                                  onClick={() => handleSendManualThankYou(purchase)}
+                                  disabled={sendingMap[purchase.id]}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold transition-all disabled:opacity-50"
+                                  title="Send WhatsApp Thank-You receipt automatically"
+                                >
+                                  {sendingMap[purchase.id] ? (
+                                    <div className="w-3.5 h-3.5 border-2 border-emerald-600/30 border-t-emerald-600 rounded-full animate-spin" />
+                                  ) : (
+                                    <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                                  )}
+                                  <span>{sendingMap[purchase.id] ? 'Sending...' : 'Thank-You'}</span>
+                                </button>
+                              </>
                             )}
                           </div>
                         </td>
@@ -756,6 +795,7 @@ export default function DashboardPage() {
           onConfirm={handleConfirmPaymentReceived}
           customerName={activePaymentModal.customerName}
           whatsappNumber={activePaymentModal.whatsappNumber}
+          billNumber={activePaymentModal.billNumber}
           amountPayable={activePaymentModal.amount}
           paidAmount={activePaymentModal.paidAmount || 0}
           balanceDue={activePaymentModal.balanceDue}
@@ -764,6 +804,18 @@ export default function DashboardPage() {
           pharmacyName={pharmacyName}
           isProcessing={isProcessingPayment}
           errorMessage={paymentModalError}
+          onShowReceipt={(rcp) => setActiveReceipt(rcp)}
+        />
+      )}
+
+      {/* Official Payment Receipt Slip Modal */}
+      {activeReceipt && (
+        <ReceiptModal
+          isOpen={Boolean(activeReceipt)}
+          onClose={() => setActiveReceipt(null)}
+          receipt={activeReceipt}
+          pharmacyName={pharmacyName}
+          upiId={upiId}
         />
       )}
 
