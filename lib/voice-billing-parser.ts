@@ -270,3 +270,168 @@ export function parseAllInOneVoiceSentence(rawText: string): {
     discount: String(Math.min(100, Math.max(0, Number(discount) || 0))),
   };
 }
+
+/**
+ * Checks if the spoken text is a command to conclude medicine entry ("Complete", "Done", "முடிந்தது")
+ */
+export function isCompleteCommand(rawText: string): boolean {
+  if (!rawText) return false;
+  const str = rawText.toLowerCase().trim();
+
+  // English keywords
+  if (
+    /\b(?:complete|completed|finish|finished|done|over|all done|bill complete|end|stop adding|enough)\b/i.test(
+      str
+    )
+  ) {
+    return true;
+  }
+
+  // Tamil keywords
+  if (
+    /(?:முடிந்தது|முடிஞ்சிது|முடிஞ்சுது|முடிச்சிட்டேன்|போதும்|பில் முடிந்தது|முற்றும்|முடித்துவிடு)/i.test(
+      str
+    )
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Checks if the spoken text indicates affirmative confirmation ("Yes", "Process", "ஆம்")
+ */
+export function isProcessYes(rawText: string): boolean {
+  if (!rawText) return false;
+  const str = rawText.toLowerCase().trim();
+
+  // English affirmative keywords
+  if (
+    /\b(?:yes|yeah|yup|sure|ok|okay|correct|proceed|process|save|submit|confirm|yes process|do it)\b/i.test(
+      str
+    )
+  ) {
+    return true;
+  }
+
+  // Tamil affirmative keywords
+  if (
+    /(?:ஆம்|ஆமா|ஆமாம்|சரி|ப்ராசஸ்|சேமி|போடு|பில் போடு|பில் சேமி|அனுப்பு|சரிதான்|செயலாக்கு)/i.test(
+      str
+    )
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Checks if the spoken text indicates negative / hold response ("No", "Wait", "இல்லை")
+ */
+export function isProcessNo(rawText: string): boolean {
+  if (!rawText) return false;
+  const str = rawText.toLowerCase().trim();
+
+  // English negative keywords
+  if (
+    /\b(?:no|nope|wait|hold|stop|cancel|don't|dont|not now|later|manual|pause|wait wait)\b/i.test(
+      str
+    )
+  ) {
+    return true;
+  }
+
+  // Tamil negative keywords
+  if (
+    /(?:இல்லை|இல்ல|வேண்டாம்|வேணாம்|நில்லு|பொறு|காத்திரு|வெயிட்|நிறுத்து|அப்புறம்)/i.test(
+      str
+    )
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Extracts a valid 10-digit Indian phone number from spoken voice text
+ * Handles spoken digits, words in Tamil/English, and standard prefixes (+91, 91, 0)
+ */
+export function extract10DigitPhoneNumber(rawText: string): string | null {
+  if (!rawText) return null;
+  const normalized = normalizeVoiceText(rawText);
+
+  // Extract all digit characters
+  const digitsOnly = normalized.replace(/\D/g, '');
+
+  if (!digitsOnly) return null;
+
+  // Handle +91 or 91 country code (12 digits)
+  if (digitsOnly.length === 12 && digitsOnly.startsWith('91')) {
+    const candidate = digitsOnly.slice(2);
+    if (/^[6-9]\d{9}$/.test(candidate)) return candidate;
+  }
+
+  // Handle leading 0 (11 digits)
+  if (digitsOnly.length === 11 && digitsOnly.startsWith('0')) {
+    const candidate = digitsOnly.slice(1);
+    if (/^[6-9]\d{9}$/.test(candidate)) return candidate;
+  }
+
+  // Handle direct 10 digits
+  if (digitsOnly.length === 10) {
+    if (/^[6-9]\d{9}$/.test(digitsOnly)) return digitsOnly;
+  }
+
+  // Check if any substring of 10 digits matches valid Indian mobile pattern
+  const subMatch = digitsOnly.match(/[6-9]\d{9}/);
+  if (subMatch) {
+    return subMatch[0];
+  }
+
+  return null;
+}
+
+export interface VoiceCustomerMatch {
+  id: string;
+  name: string;
+  whatsapp_number: string;
+}
+
+/**
+ * Finds a customer from the saved master list based on voice input name or phone
+ */
+export function findMatchingCustomer<T extends { id: string; name: string; whatsapp_number: string }>(
+  spokenQuery: string,
+  customers: T[]
+): T | null {
+  if (!spokenQuery || !spokenQuery.trim() || !customers.length) return null;
+  const q = spokenQuery.toLowerCase().trim();
+
+  // 1. Try matching phone number if digits are present
+  const extractedPhone = extract10DigitPhoneNumber(spokenQuery);
+  if (extractedPhone) {
+    const phoneMatch = customers.find(
+      (c) => c.whatsapp_number.replace(/\D/g, '').endsWith(extractedPhone)
+    );
+    if (phoneMatch) return phoneMatch;
+  }
+
+  // 2. Exact name match (case-insensitive)
+  const exactMatch = customers.find(
+    (c) => c.name.toLowerCase().trim() === q
+  );
+  if (exactMatch) return exactMatch;
+
+  // 3. Name contains query or query contains name
+  const partialMatch = customers.find((c) => {
+    const cName = c.name.toLowerCase().trim();
+    return cName.includes(q) || q.includes(cName);
+  });
+  if (partialMatch) return partialMatch;
+
+  return null;
+}
+

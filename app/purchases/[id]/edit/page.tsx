@@ -448,6 +448,12 @@ function EditPurchaseContent() {
                 setActiveRowIndex={setActiveRowIndex}
                 onUpdateField={handleItemChange}
                 onAddRow={handleAddItem}
+                customerName={customerName}
+                whatsappNumber={whatsappNumber}
+                onSetCustomerName={setCustomerName}
+                onSetWhatsappNumber={setWhatsappNumber}
+                totalAmountPayable={calculation.amount_payable}
+                onConfirmProcess={() => handleSubmit({ preventDefault: () => {} } as any)}
               />
 
               {/* Items List */}

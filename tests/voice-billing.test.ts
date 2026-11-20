@@ -5,6 +5,11 @@ import {
   parseSingleFieldVoiceInput,
   parseAllInOneVoiceSentence,
   cleanVoiceMedicineName,
+  isCompleteCommand,
+  isProcessYes,
+  isProcessNo,
+  extract10DigitPhoneNumber,
+  findMatchingCustomer,
 } from '../lib/voice-billing-parser';
 
 describe('Voice Billing Parser Tests', () => {
@@ -92,5 +97,56 @@ describe('Voice Billing Parser Tests', () => {
   it('cleans spoken medicine names', () => {
     expect(cleanVoiceMedicineName('medicine name is Dolo 650')).toBe('Dolo 650');
     expect(cleanVoiceMedicineName('டேப்லெட் பாராசிட்டமால்')).toBe('பாராசிட்டமால்');
+  });
+
+  it('recognizes complete commands in English and Tamil', () => {
+    expect(isCompleteCommand('complete')).toBe(true);
+    expect(isCompleteCommand('done')).toBe(true);
+    expect(isCompleteCommand('bill complete')).toBe(true);
+    expect(isCompleteCommand('finished')).toBe(true);
+    expect(isCompleteCommand('முடிந்தது')).toBe(true);
+    expect(isCompleteCommand('பில் முடிந்தது')).toBe(true);
+    expect(isCompleteCommand('போதும்')).toBe(true);
+
+    expect(isCompleteCommand('Dolo 650')).toBe(false);
+    expect(isCompleteCommand('2')).toBe(false);
+  });
+
+  it('recognizes process confirmation (Yes) and hold (No) commands', () => {
+    expect(isProcessYes('yes')).toBe(true);
+    expect(isProcessYes('yes process')).toBe(true);
+    expect(isProcessYes('okay')).toBe(true);
+    expect(isProcessYes('ஆம்')).toBe(true);
+    expect(isProcessYes('சரி')).toBe(true);
+    expect(isProcessYes('ப்ராசஸ்')).toBe(true);
+
+    expect(isProcessNo('no')).toBe(true);
+    expect(isProcessNo('wait')).toBe(true);
+    expect(isProcessNo('hold')).toBe(true);
+    expect(isProcessNo('இல்லை')).toBe(true);
+    expect(isProcessNo('வேண்டாம்')).toBe(true);
+    expect(isProcessNo('வெயிட்')).toBe(true);
+  });
+
+  it('extracts 10-digit phone number from spoken input', () => {
+    expect(extract10DigitPhoneNumber('9876543210')).toBe('9876543210');
+    expect(extract10DigitPhoneNumber('+91 9876543210')).toBe('9876543210');
+    expect(extract10DigitPhoneNumber('919876543210')).toBe('9876543210');
+    expect(extract10DigitPhoneNumber('09876543210')).toBe('9876543210');
+    expect(extract10DigitPhoneNumber('mobile number is 98765 43210')).toBe('9876543210');
+    expect(extract10DigitPhoneNumber('invalid 123')).toBeNull();
+  });
+
+  it('matches customer by name or phone from saved master list', () => {
+    const list = [
+      { id: 'c1', name: 'Ravi Kumar', whatsapp_number: '+919876543210' },
+      { id: 'c2', name: 'Dr Boopathy', whatsapp_number: '+919443322110' },
+      { id: 'c3', name: 'Revathi Medicals', whatsapp_number: '+919988776655' },
+    ];
+
+    expect(findMatchingCustomer('Ravi', list)?.id).toBe('c1');
+    expect(findMatchingCustomer('Dr Boopathy', list)?.id).toBe('c2');
+    expect(findMatchingCustomer('9988776655', list)?.id).toBe('c3');
+    expect(findMatchingCustomer('Unknown Person', list)).toBeNull();
   });
 });

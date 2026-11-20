@@ -213,7 +213,7 @@ function NewPurchaseContent() {
   }, [savedCustomers, customerSearchQuery]);
 
   // Select customer from searchable dropdown
-  const handleSelectCustomer = (customer: SavedCustomer) => {
+  const handleSelectCustomer = (customer: { id: string; name: string; whatsapp_number: string; outstanding_balance?: number }) => {
     setSelectedCustomerId(customer.id);
     setCustomerName(customer.name);
     setWhatsappNumber(customer.whatsapp_number);
@@ -283,6 +283,38 @@ function NewPurchaseContent() {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to save customer';
       setSaveToMasterMessage({ type: 'error', text: msg });
+    } finally {
+      setIsSavingToMaster(false);
+    }
+  };
+
+  // Voice Assistant auto-save new customer handler
+  const handleSaveNewCustomerFromVoice = async (name: string, phone: string) => {
+    if (!name.trim() || !isValidWhatsAppNumber(phone)) return false;
+    setIsSavingToMaster(true);
+    try {
+      const res = await fetch('/api/customers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          whatsapp_number: phone.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Failed to save customer');
+      setSaveToMasterMessage({
+        type: 'success',
+        text: `✓ "${name.trim()}" saved to Customer Master!`,
+      });
+      await fetchSavedCustomers();
+      if (data?.customer?.id) {
+        setSelectedCustomerId(data.customer.id);
+      }
+      return true;
+    } catch (err: unknown) {
+      console.warn('Voice save customer error:', err);
+      return false;
     } finally {
       setIsSavingToMaster(false);
     }
@@ -432,6 +464,24 @@ function NewPurchaseContent() {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  // Process purchase triggered directly by conversational voice assistant ("Yes" / "ஆம்")
+  const handleProcessPurchaseFromVoice = async () => {
+    if (!customerName.trim()) {
+      setFormError('Please enter or speak customer name.');
+      return;
+    }
+    if (!isValidWhatsAppNumber(whatsappNumber)) {
+      setFormError('Please enter a valid 10-digit WhatsApp number.');
+      return;
+    }
+    const validItems = items.filter((it) => it.itemName.trim() && Number(it.mrp) > 0);
+    if (validItems.length === 0) {
+      setFormError('Please add at least one item with a valid name and MRP.');
+      return;
+    }
+    await handleProcessPurchase();
   };
 
   return (
@@ -618,6 +668,20 @@ function NewPurchaseContent() {
                 setActiveRowIndex={setActiveRowIndex}
                 onUpdateField={handleItemChange}
                 onAddRow={handleAddItem}
+                customerName={customerName}
+                whatsappNumber={whatsappNumber}
+                savedCustomers={savedCustomers}
+                onSelectCustomer={handleSelectCustomer}
+                onSetCustomerName={(name: string) => {
+                  setCustomerName(name);
+                  setCustomerSearchQuery(name);
+                }}
+                onSetWhatsappNumber={(phone: string) => {
+                  setWhatsappNumber(phone);
+                }}
+                onSaveNewCustomer={handleSaveNewCustomerFromVoice}
+                totalAmountPayable={calculation.amount_payable}
+                onConfirmProcess={handleProcessPurchaseFromVoice}
               />
 
               {/* Items List */}
